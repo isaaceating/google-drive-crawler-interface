@@ -1,26 +1,11 @@
 /**
  * Google Drive Crawler interface
- * 範例: Lumens 產品彈藥庫
- * Version: v1.5 (FAST LOAD + LOADING DIALOG)
- *
- * v1.5：
- * 1. 保留 v1.4 CacheService 秒開架構
- * 2. 前端新增初始讀取視窗
- * 3. 其他功能與資料結構完全不變
- * 結構規則：
- * 1. Root 內可有 folder / file
- * 2. 第一階面板顯示 Root 內所有項目
- * 3. 點第一階 file -> 右側預覽
- * 4. 點第一階 folder -> 第二階面板顯示該 folder 內的 file / subfolder
- * 5. 點第二階 file -> 右側預覽
- * 6. 點第二階 subfolder -> 在第二階面板內展開/收合該 subfolder 內的 files
- * 7. subfolder 內只支援 files，不再往下抓更深層
- * 
+ * Version: v1.6 (GLOBAL SEARCH FIXED)
  */
 
 const ROOT_FOLDER_ID = '1zAFat5y1UL-vMqg5yQVy0SAgRD7WG0uY';
 const CACHE_KEY = 'KNOWLEDGE_TREE_CACHE';
-const CACHE_TIME = 21600; // 6 小時
+const CACHE_TIME = 21600;
 
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('index')
@@ -32,33 +17,25 @@ function getKnowledgeTree() {
   const cache = CacheService.getScriptCache();
   const cached = cache.get(CACHE_KEY);
 
-  if (cached) {
-    return JSON.parse(cached);
-  }
+  if (cached) return JSON.parse(cached);
 
   const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
 
   const data = {
     rootName: root.getName(),
-    items: getFolderItems_(root, 0)
+    items: getFolderItems_(root, 0),
+    searchFiles: getAllFilesRecursive_(root, root.getName())
   };
 
   cache.put(CACHE_KEY, JSON.stringify(data), CACHE_TIME);
-
   return data;
 }
 
-/**
- * 手動刷新 cache
- */
 function refreshCache() {
-  const cache = CacheService.getScriptCache();
-  cache.remove(CACHE_KEY);
+  CacheService.getScriptCache().remove(CACHE_KEY);
 }
 
-/**
- * 原本邏輯完全保留
- */
+/* ===== 原本結構 ===== */
 
 function getFolderItems_(folder, level) {
   const items = [];
@@ -91,7 +68,6 @@ function getFolderItems_(folder, level) {
   }
 
   items.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
-
   return items;
 }
 
@@ -107,6 +83,31 @@ function getFilesOnly_(folder, level) {
   items.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
   return items;
 }
+
+/* ===== 搜尋用（關鍵修正） ===== */
+
+function getAllFilesRecursive_(folder, path) {
+  const results = [];
+
+  const files = folder.getFiles();
+  while (files.hasNext()) {
+    const file = files.next();
+    const item = buildFileItem_(file, 0);
+    item.path = path;
+    results.push(item);
+  }
+
+  const folders = folder.getFolders();
+  while (folders.hasNext()) {
+    const sub = folders.next();
+    results.push(...getAllFilesRecursive_(sub, path + ' / ' + sub.getName()));
+  }
+
+  results.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+  return results;
+}
+
+/* ===== file ===== */
 
 function buildFileItem_(file, level) {
   const type = mapMimeType_(file.getMimeType());
