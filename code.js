@@ -1,11 +1,21 @@
 /**
  * Google Drive Crawler interface
  * 範例: Lumens 產品彈藥庫
- * Version: v1.4 (FAST LOAD)
+ * Version: v1.5 (FAST LOAD + LOADING DIALOG)
  *
- * v1.4：
- * 1. CacheService 加速（秒開）
- * 2. 結構完全不變
+ * v1.5：
+ * 1. 保留 v1.4 CacheService 秒開架構
+ * 2. 前端新增初始讀取視窗
+ * 3. 其他功能與資料結構完全不變
+ * 結構規則：
+ * 1. Root 內可有 folder / file
+ * 2. 第一階面板顯示 Root 內所有項目
+ * 3. 點第一階 file -> 右側預覽
+ * 4. 點第一階 folder -> 第二階面板顯示該 folder 內的 file / subfolder
+ * 5. 點第二階 file -> 右側預覽
+ * 6. 點第二階 subfolder -> 在第二階面板內展開/收合該 subfolder 內的 files
+ * 7. subfolder 內只支援 files，不再往下抓更深層
+ * 
  */
 
 const ROOT_FOLDER_ID = '1zAFat5y1UL-vMqg5yQVy0SAgRD7WG0uY';
@@ -17,6 +27,7 @@ function doGet() {
     .setTitle('Lumens 產品彈藥庫')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
+
 function getKnowledgeTree() {
   const cache = CacheService.getScriptCache();
   const cached = cache.get(CACHE_KEY);
@@ -38,7 +49,7 @@ function getKnowledgeTree() {
 }
 
 /**
- * 🔥 手動刷新 cache（之後你可以加在 menu）
+ * 手動刷新 cache
  */
 function refreshCache() {
   const cache = CacheService.getScriptCache();
@@ -46,7 +57,7 @@ function refreshCache() {
 }
 
 /**
- * 原本邏輯完全保留 ↓↓↓
+ * 原本邏輯完全保留
  */
 
 function getFolderItems_(folder, level) {
