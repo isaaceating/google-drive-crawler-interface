@@ -1,43 +1,57 @@
 /**
- * Lumens 產品彈藥庫
- * Version: 介面 v1.2
+ * Google Drive Crawler interface
+ * 範例: Lumens 產品彈藥庫
+ * Version: v1.4 (FAST LOAD)
  *
- * 結構規則：
- * 1. Root 內可有 folder / file
- * 2. 第一階面板顯示 Root 內所有項目
- * 3. 點第一階 file -> 右側預覽
- * 4. 點第一階 folder -> 第二階面板顯示該 folder 內的 file / subfolder
- * 5. 點第二階 file -> 右側預覽
- * 6. 點第二階 subfolder -> 在第二階面板內展開/收合該 subfolder 內的 files
- * 7. subfolder 內只支援 files，不再往下抓更深層
+ * v1.4：
+ * 1. CacheService 加速（秒開）
+ * 2. 結構完全不變
  */
 
 const ROOT_FOLDER_ID = '1zAFat5y1UL-vMqg5yQVy0SAgRD7WG0uY';
+const CACHE_KEY = 'KNOWLEDGE_TREE_CACHE';
+const CACHE_TIME = 21600; // 6 小時
 
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('index')
     .setTitle('Lumens 產品彈藥庫')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
-
 function getKnowledgeTree() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(CACHE_KEY);
+
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
   const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
 
-  return {
+  const data = {
     rootName: root.getName(),
     items: getFolderItems_(root, 0)
   };
+
+  cache.put(CACHE_KEY, JSON.stringify(data), CACHE_TIME);
+
+  return data;
 }
 
 /**
- * level 0 = root
- * level 1 = 主資料夾
- * level 2 = 子資料夾（只抓 files，不再抓 folder）
+ * 🔥 手動刷新 cache（之後你可以加在 menu）
  */
+function refreshCache() {
+  const cache = CacheService.getScriptCache();
+  cache.remove(CACHE_KEY);
+}
+
+/**
+ * 原本邏輯完全保留 ↓↓↓
+ */
+
 function getFolderItems_(folder, level) {
   const items = [];
 
-  // 先抓 folders
   const folders = folder.getFolders();
   while (folders.hasNext()) {
     const sub = folders.next();
@@ -51,27 +65,20 @@ function getFolderItems_(folder, level) {
     };
 
     if (level === 0) {
-      // Root 下的主資料夾：抓其內 file + subfolder
       folderItem.children = getFolderItems_(sub, 1);
     } else if (level === 1) {
-      // 主資料夾下的子資料夾：只抓文件，不再抓更深層
       folderItem.children = getFilesOnly_(sub, 2);
-    } else {
-      // 不再往下
-      folderItem.children = [];
     }
 
     items.push(folderItem);
   }
 
-  // 再抓 files
   const files = folder.getFiles();
   while (files.hasNext()) {
     const file = files.next();
     items.push(buildFileItem_(file, level));
   }
 
-  // 名稱排序
   items.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
 
   return items;
@@ -118,29 +125,12 @@ function mapMimeType_(mime) {
 function buildPreviewLink_(file, type) {
   const id = file.getId();
 
-  if (type === 'doc') {
-    return `https://docs.google.com/document/d/${id}/preview`;
-  }
-
-  if (type === 'slides') {
-    return `https://docs.google.com/presentation/d/${id}/preview`;
-  }
-
-  if (type === 'sheet') {
-    return `https://docs.google.com/spreadsheets/d/${id}/preview`;
-  }
-
-  if (type === 'pdf') {
-    return `https://drive.google.com/file/d/${id}/preview`;
-  }
-
-  if (type === 'image') {
-    return `https://drive.google.com/thumbnail?id=${id}&sz=w2000`;
-  }
-
-  if (type === 'video') {
-    return `https://drive.google.com/file/d/${id}/preview`;
-  }
+  if (type === 'doc') return `https://docs.google.com/document/d/${id}/preview`;
+  if (type === 'slides') return `https://docs.google.com/presentation/d/${id}/preview`;
+  if (type === 'sheet') return `https://docs.google.com/spreadsheets/d/${id}/preview`;
+  if (type === 'pdf') return `https://drive.google.com/file/d/${id}/preview`;
+  if (type === 'image') return `https://drive.google.com/thumbnail?id=${id}&sz=w2000`;
+  if (type === 'video') return `https://drive.google.com/file/d/${id}/preview`;
 
   return file.getUrl();
 }
