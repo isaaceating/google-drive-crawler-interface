@@ -1,10 +1,18 @@
 /**
  * Google Drive Crawler interface
- * Version: v1.6 (GLOBAL SEARCH FIXED)
+ * Version: v1.7.1
+ *
+ * Features:
+ * 1. Lazy Load：Folder 展開時才讀取內容
+ * 2. Search Index：全域搜尋只搜尋「文件檔名」
+ * 3. Panel 1：顯示第 1 層，可展開第 2 層
+ * 4. Panel 2：顯示選中第 2 層資料夾內容，可展開第 4 層
+ * 5. 第 4 層資料夾不再繼續展開，改顯示不支援並提供 Google Drive 連結
  */
 
 const ROOT_FOLDER_ID = '1zAFat5y1UL-vMqg5yQVy0SAgRD7WG0uY';
-const CACHE_KEY = 'KNOWLEDGE_TREE_CACHE';
+
+const SEARCH_INDEX_CACHE_KEY = 'KNOWLEDGE_SEARCH_INDEX_V171';
 const CACHE_TIME = 21600;
 
 function doGet() {
@@ -13,86 +21,85 @@ function doGet() {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-function getKnowledgeTree() {
-  const cache = CacheService.getScriptCache();
-  const cached = cache.get(CACHE_KEY);
-
-  if (cached) return JSON.parse(cached);
-
+/**
+ * 初始只抓 Root 第一層
+ */
+function getRootItems() {
   const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
-
-  const data = {
-    rootName: root.getName(),
-    items: getFolderItems_(root, 0),
-    searchFiles: getAllFilesRecursive_(root, root.getName())
-  };
-
-  cache.put(CACHE_KEY, JSON.stringify(data), CACHE_TIME);
-  return data;
+  return getFolderItemsLazy_(root);
 }
 
-function refreshCache() {
-  CacheService.getScriptCache().remove(CACHE_KEY);
+/**
+ * Lazy Load：展開或選取 Folder 時才抓子層
+ */
+function getFolderChildren(folderId) {
+  const folder = DriveApp.getFolderById(folderId);
+  return getFolderItemsLazy_(folder);
 }
 
-/* ===== 原本結構 ===== */
-
-function getFolderItems_(folder, level) {
+/**
+ * 只抓指定資料夾的下一層，不遞迴
+ */
+function getFolderItemsLazy_(folder) {
   const items = [];
 
   const folders = folder.getFolders();
   while (folders.hasNext()) {
     const sub = folders.next();
 
-    const folderItem = {
+    items.push({
       id: sub.getId(),
       name: sub.getName(),
       itemType: 'folder',
-      level: level,
-      children: []
-    };
-
-    if (level === 0) {
-      folderItem.children = getFolderItems_(sub, 1);
-    } else if (level === 1) {
-      folderItem.children = getFilesOnly_(sub, 2);
-    }
-
-    items.push(folderItem);
+      hasChildren: true,
+      openLink: sub.getUrl()
+    });
   }
 
   const files = folder.getFiles();
   while (files.hasNext()) {
     const file = files.next();
-    items.push(buildFileItem_(file, level));
+    items.push(buildFileItem_(file));
   }
 
   items.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
   return items;
 }
 
-function getFilesOnly_(folder, level) {
-  const items = [];
-  const files = folder.getFiles();
+/**
+ * 全域搜尋 Index
+ * 注意：前端只比對文件檔名，不比對資料夾 path
+ */
+function getSearchIndex() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(SEARCH_INDEX_CACHE_KEY);
 
-  while (files.hasNext()) {
-    const file = files.next();
-    items.push(buildFileItem_(file, level));
-  }
+  if (cached) return JSON.parse(cached);
 
-  items.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
-  return items;
+  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  const files = getAllFilesRecursive_(root, root.getName());
+
+  files.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+
+  cache.put(SEARCH_INDEX_CACHE_KEY, JSON.stringify(files), CACHE_TIME);
+  return files;
 }
 
-/* ===== 搜尋用（關鍵修正） ===== */
+function refreshSearchIndexCache() {
+  CacheService.getScriptCache().remove(SEARCH_INDEX_CACHE_KEY);
+}
 
+/**
+ * 建立搜尋用文件 Index
+ * 只收 file，不收 folder
+ */
 function getAllFilesRecursive_(folder, path) {
   const results = [];
 
   const files = folder.getFiles();
   while (files.hasNext()) {
     const file = files.next();
-    const item = buildFileItem_(file, 0);
+    const item = buildFileItem_(file);
     item.path = path;
     results.push(item);
   }
@@ -103,20 +110,17 @@ function getAllFilesRecursive_(folder, path) {
     results.push(...getAllFilesRecursive_(sub, path + ' / ' + sub.getName()));
   }
 
-  results.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
   return results;
 }
 
-/* ===== file ===== */
-
-function buildFileItem_(file, level) {
+function buildFileItem_(file) {
   const type = mapMimeType_(file.getMimeType());
+
   return {
     id: file.getId(),
     name: file.getName(),
     itemType: 'file',
     fileType: type,
-    level: level,
     previewLink: buildPreviewLink_(file, type),
     openLink: file.getUrl()
   };

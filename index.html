@@ -2,18 +2,23 @@
 <!--
   Google Drive Crawler interface
   範例: Lumens 產品彈藥庫
-  Version: v1.5
-  搭配 Code.gs Version: v1.5 (FAST LOAD + LOADING DIALOG)
+  Version: v1.7.1
+  搭配 Code.gs Version: v1.7.1
 
-  v1.5：
-  1. 保留 v1.4 秒開版所有功能
-  2. 新增初始讀取視窗
-  3. 資料載入完成後自動關閉讀取視窗
+  v1.7.1：
+  1. Lazy Load：Folder 展開時才讀取內容
+  2. Search Index：全域搜尋只搜尋「文件檔名」
+  3. 搜尋時 Panel 2 清空並恢復原始提示
+  4. Panel 1 顯示第 1 層，可展開第 2 層
+  5. 點選第 2 層資料夾後，Panel 2 顯示第 3 層
+  6. Panel 2 可展開第 4 層
+  7. 點擊第 4 層資料夾時，Viewer 顯示不支援並提供 Google Drive 連結
 -->
 <html>
   <head>
     <base target="_top">
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+
     <style>
       * {
         box-sizing: border-box;
@@ -90,11 +95,11 @@
       }
 
       .panel-1 {
-        width: 300px;
+        width: 330px;
       }
 
       .panel-2 {
-        width: 320px;
+        width: 330px;
       }
 
       .panel.collapsed {
@@ -130,7 +135,8 @@
       }
 
       .panel.collapsed .panel-title-wrap,
-      .panel.collapsed .panel-body {
+      .panel.collapsed .panel-body,
+      .panel.collapsed .search-area {
         display: none;
       }
 
@@ -149,17 +155,39 @@
         border-bottom: 1px solid #eef2f7;
       }
 
-      .panel.collapsed .search-area {
-        display: none;
+      .search-wrap {
+        position: relative;
       }
 
       .search-input {
         width: 100%;
-        padding: 10px 12px;
+        padding: 10px 34px 10px 12px;
         border: 1px solid #cfd8e3;
         border-radius: 8px;
         font-size: 14px;
         outline: none;
+      }
+
+      .search-clear {
+        position: absolute;
+        top: 50%;
+        right: 8px;
+        transform: translateY(-50%);
+        width: 22px;
+        height: 22px;
+        border: none;
+        background: #e5e7eb;
+        color: #374151;
+        border-radius: 50%;
+        cursor: pointer;
+        display: none;
+        line-height: 22px;
+        text-align: center;
+        font-size: 13px;
+      }
+
+      .search-clear.show {
+        display: block;
       }
 
       .panel-body {
@@ -168,36 +196,43 @@
         padding: 10px;
       }
 
-      .item,
-      .subfolder-header,
-      .subfile-item {
+      .tree-row,
+      .search-result {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 10px 10px;
+        padding: 9px 10px;
         border-radius: 10px;
         cursor: pointer;
         user-select: none;
       }
 
-      .item:hover,
-      .subfolder-header:hover,
-      .subfile-item:hover {
+      .tree-row:hover,
+      .search-result:hover {
         background: #f3f7fd;
       }
 
-      .item.active,
-      .subfile-item.active {
+      .tree-row.active,
+      .search-result.active {
         background: #eaf2ff;
       }
 
-      .item-icon,
-      .subfile-icon {
-        width: 18px;
+      .tree-toggle {
+        width: 16px;
+        flex: 0 0 16px;
         text-align: center;
-        flex: 0 0 18px;
+        color: #4b5563;
+        font-size: 12px;
       }
 
+      .tree-icon,
+      .item-icon {
+        width: 18px;
+        flex: 0 0 18px;
+        text-align: center;
+      }
+
+      .tree-name,
       .item-name {
         flex: 1;
         min-width: 0;
@@ -206,19 +241,38 @@
         word-break: break-word;
       }
 
-      .folder-block {
-        margin-bottom: 6px;
-      }
-
-      .subfolder-files {
-        margin-left: 22px;
+      .tree-children {
+        margin-left: 20px;
         padding-left: 8px;
         border-left: 1px solid #dbe3ee;
         display: none;
       }
 
-      .subfolder-files.expanded {
+      .tree-children.expanded {
         display: block;
+      }
+
+      .folder-block {
+        margin-bottom: 4px;
+      }
+
+      .tree-loading,
+      .tree-empty {
+        color: #6b7280;
+        font-size: 13px;
+        padding: 10px 12px;
+      }
+
+      .search-result-content {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .search-path {
+        font-size: 12px;
+        color: #6b7280;
+        margin-top: 3px;
+        line-height: 1.35;
       }
 
       .viewer-area {
@@ -304,6 +358,33 @@
         padding: 24px;
       }
 
+      .unsupported-card {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+        text-align: center;
+        color: #374151;
+      }
+
+      .unsupported-box {
+        max-width: 520px;
+      }
+
+      .unsupported-title {
+        font-size: 22px;
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
+
+      .unsupported-text {
+        font-size: 14px;
+        line-height: 1.7;
+        color: #6b7280;
+        margin-bottom: 18px;
+      }
+
       .collapsed-placeholder {
         display: none;
         flex: 1;
@@ -322,16 +403,14 @@
       }
 
       @media (max-width: 1100px) {
-        .panel-1 {
-          width: 240px;
-        }
-
+        .panel-1,
         .panel-2 {
-          width: 260px;
+          width: 270px;
         }
       }
     </style>
   </head>
+
   <body>
     <div id="loadingOverlay" class="loading-overlay">
       <div class="loading-box">
@@ -345,47 +424,55 @@
     </div>
 
     <div class="app">
-      <!-- 第一階 -->
       <aside id="panel1" class="panel panel-1">
         <div class="panel-header">
           <div class="panel-title-wrap">
             <div class="panel-title">Lumens 產品彈藥庫</div>
-            <div class="panel-subtitle">Root 內容</div>
+            <div class="panel-subtitle">第一層 / 第二層</div>
           </div>
           <button class="toggle-btn" onclick="togglePanel('panel1', this)">«</button>
         </div>
 
         <div class="search-area">
-          <input id="searchInput" class="search-input" type="text" placeholder="搜尋第一階..." oninput="renderRootPanel()" />
+          <div class="search-wrap">
+            <input
+              id="searchInput"
+              class="search-input"
+              type="text"
+              placeholder="搜尋所有文件..."
+              oninput="handleSearchInput()"
+            />
+            <button id="searchClearBtn" class="search-clear" onclick="clearSearch()">×</button>
+          </div>
         </div>
 
         <div id="panel1Body" class="panel-body"></div>
         <div class="collapsed-placeholder">第一階</div>
       </aside>
 
-      <!-- 第二階 -->
       <aside id="panel2" class="panel panel-2">
         <div class="panel-header">
           <div class="panel-title-wrap">
             <div id="panel2Title" class="panel-title">第二階面板</div>
-            <div id="panel2Subtitle" class="panel-subtitle">請先點選第一階的主資料夾</div>
+            <div id="panel2Subtitle" class="panel-subtitle">請先點選或展開第一階資料夾</div>
           </div>
           <button class="toggle-btn" onclick="togglePanel('panel2', this)">«</button>
         </div>
 
         <div id="panel2Body" class="panel-body">
-          <div class="empty-state">請先從第一階選擇一個主資料夾</div>
+          <div class="empty-state">請先從第一階選擇一個資料夾</div>
         </div>
         <div class="collapsed-placeholder">第二階</div>
       </aside>
 
-      <!-- 右側內容 -->
       <main class="viewer-area">
         <div class="viewer-header">
           <h1 id="viewerTitle" class="viewer-title">請選擇文件</h1>
           <div id="viewerMeta" class="viewer-meta">左側點擊文件後，會在這裡顯示內容</div>
           <div class="viewer-actions">
-            <a id="openOriginalBtn" class="viewer-btn" href="#" target="_blank" style="display:none;">Open in Google Drive</a>
+            <a id="openOriginalBtn" class="viewer-btn" href="#" target="_blank" style="display:none;">
+              Open in Google Drive
+            </a>
           </div>
         </div>
 
@@ -397,250 +484,511 @@
       </main>
     </div>
 
-    <script>
-      let knowledgeTree = null;
-      let selectedRootFolderId = null;
-      let activeFileId = null;
-      let expandedSubfolders = {};
+<script>
+  let rootItems = [];
+  let searchIndex = [];
+  let childrenCache = {};
 
-      function init() {
-        showLoading();
+  let expandedPanel1 = {};
+  let expandedPanel2 = {};
 
-        google.script.run
-          .withSuccessHandler(onTreeLoaded)
-          .withFailureHandler(onLoadError)
-          .getKnowledgeTree();
-      }
+  let activeFileId = null;
+  let activePanel1FolderId = null;
+  let activePanel2FolderId = null;
 
-      function showLoading() {
-        const overlay = document.getElementById('loadingOverlay');
-        if (overlay) overlay.style.display = 'flex';
-      }
+  function init() {
+    showLoading();
 
-      function hideLoading() {
-        const overlay = document.getElementById('loadingOverlay');
-        if (overlay) overlay.style.display = 'none';
-      }
+    google.script.run
+      .withSuccessHandler(onRootLoaded)
+      .withFailureHandler(onLoadError)
+      .getRootItems();
 
-      function onTreeLoaded(data) {
-        knowledgeTree = data;
-        renderRootPanel();
-        hideLoading();
-      }
+    google.script.run
+      .withSuccessHandler(function (data) {
+        searchIndex = data || [];
+      })
+      .withFailureHandler(function (err) {
+        console.log('Search index load failed:', err);
+      })
+      .getSearchIndex();
+  }
 
-      function onLoadError(err) {
-        hideLoading();
+  function showLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.style.display = 'flex';
+  }
 
-        document.getElementById('panel1Body').innerHTML =
-          '<div class="empty-state">載入失敗：' + escapeHtml(err.message || err) + '</div>';
-      }
+  function hideLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.style.display = 'none';
+  }
 
-      function togglePanel(panelId, btn) {
-        const panel = document.getElementById(panelId);
-        panel.classList.toggle('collapsed');
-        btn.textContent = panel.classList.contains('collapsed') ? '»' : '«';
-      }
+  function onRootLoaded(data) {
+    rootItems = data || [];
+    childrenCache.root = rootItems;
+    renderPanel1();
+    hideLoading();
+  }
 
-      function renderRootPanel() {
-        if (!knowledgeTree) return;
+  function onLoadError(err) {
+    hideLoading();
+    document.getElementById('panel1Body').innerHTML =
+      '<div class="empty-state">載入失敗：' + escapeHtml(err.message || err) + '</div>';
+  }
 
-        const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
-        const body = document.getElementById('panel1Body');
+  function togglePanel(panelId, btn) {
+    const panel = document.getElementById(panelId);
+    panel.classList.toggle('collapsed');
+    btn.textContent = panel.classList.contains('collapsed') ? '»' : '«';
+  }
 
-        let items = knowledgeTree.items || [];
-        if (keyword) {
-          items = items.filter(item => item.name.toLowerCase().includes(keyword));
-        }
+  /* =========================
+     Panel 1
+     第一層資料夾可展開
+     第二層資料夾不可展開，只能送到 Panel 2
+  ========================= */
 
-        if (!items.length) {
-          body.innerHTML = '<div class="empty-state">找不到符合的項目</div>';
-          return;
-        }
+  function renderPanel1() {
+    const body = document.getElementById('panel1Body');
 
-        body.innerHTML = items.map(item => {
-          const isActiveFolder = item.itemType === 'folder' && item.id === selectedRootFolderId;
-          const isActiveFile = item.itemType === 'file' && item.id === activeFileId;
+    if (!rootItems.length) {
+      body.innerHTML = '<div class="empty-state">目前沒有資料</div>';
+      return;
+    }
 
-          return `
-            <div class="folder-block">
-              <div class="item ${isActiveFolder || isActiveFile ? 'active' : ''}" onclick="handleRootItemClick('${item.id}')">
-                <div class="item-icon">${getIcon(item)}</div>
-                <div class="item-name">${escapeHtml(item.name)}</div>
-              </div>
-            </div>
-          `;
-        }).join('');
-      }
+    body.innerHTML = rootItems.map(item => renderPanel1FirstLevelItem(item)).join('');
+  }
 
-      function handleRootItemClick(itemId) {
-        const item = (knowledgeTree.items || []).find(x => x.id === itemId);
-        if (!item) return;
+  function renderPanel1FirstLevelItem(item) {
+    if (item.itemType === 'file') {
+      return `
+        <div class="tree-row ${item.id === activeFileId ? 'active' : ''}" onclick="openFileById('${item.id}')">
+          <div class="tree-toggle"></div>
+          <div class="tree-icon">${getIcon(item)}</div>
+          <div class="tree-name">${escapeHtml(item.name)}</div>
+        </div>
+      `;
+    }
 
-        if (item.itemType === 'file') {
-          selectedRootFolderId = null;
-          activeFileId = item.id;
-          renderRootPanel();
-          clearSecondPanel();
-          openFile(item);
-          return;
-        }
+    const expanded = !!expandedPanel1[item.id];
 
-        if (item.itemType === 'folder') {
-          selectedRootFolderId = item.id;
-          activeFileId = null;
-          renderRootPanel();
-          renderSecondPanel(item);
-        }
-      }
+    return `
+      <div class="folder-block">
+        <div class="tree-row ${item.id === activePanel1FolderId ? 'active' : ''}" onclick="togglePanel1FirstLevelFolder('${item.id}')">
+          <div class="tree-toggle">${expanded ? '▼' : '▶'}</div>
+          <div class="tree-icon">📁</div>
+          <div class="tree-name">${escapeHtml(item.name)}</div>
+        </div>
 
-      function renderSecondPanel(folderItem) {
-        const title = document.getElementById('panel2Title');
-        const subtitle = document.getElementById('panel2Subtitle');
-        const body = document.getElementById('panel2Body');
+        <div id="panel1-children-${item.id}" class="tree-children ${expanded ? 'expanded' : ''}">
+          ${expanded ? renderPanel1SecondLevelList(item.id) : ''}
+        </div>
+      </div>
+    `;
+  }
 
-        title.textContent = folderItem.name;
-        subtitle.textContent = '顯示主資料夾內的文件與子資料夾';
+  function renderPanel1SecondLevelList(folderId) {
+    if (!childrenCache[folderId]) {
+      return '<div class="tree-loading">讀取中...</div>';
+    }
 
-        const children = folderItem.children || [];
-        if (!children.length) {
-          body.innerHTML = '<div class="empty-state">此主資料夾尚無內容</div>';
-          return;
-        }
+    const children = childrenCache[folderId];
 
-        body.innerHTML = children.map(item => {
-          if (item.itemType === 'file') {
-            return `
-              <div class="item ${item.id === activeFileId ? 'active' : ''}" onclick="openSecondLevelFile('${folderItem.id}','${item.id}')">
-                <div class="item-icon">${getIcon(item)}</div>
-                <div class="item-name">${escapeHtml(item.name)}</div>
-              </div>
-            `;
-          }
+    if (!children.length) {
+      return '<div class="tree-empty">此資料夾沒有內容</div>';
+    }
 
-          const expanded = !!expandedSubfolders[item.id];
-          const subFiles = item.children || [];
-
-          return `
-            <div class="folder-block">
-              <div class="subfolder-header" onclick="toggleSubfolder('${folderItem.id}', '${item.id}')">
-                <div class="item-icon">${expanded ? '▼' : '▶'}</div>
-                <div class="item-icon">📁</div>
-                <div class="item-name">${escapeHtml(item.name)}</div>
-              </div>
-
-              <div class="subfolder-files ${expanded ? 'expanded' : ''}" id="subfolder-${item.id}">
-                ${subFiles.length
-                  ? subFiles.map(f => `
-                    <div class="subfile-item ${f.id === activeFileId ? 'active' : ''}" onclick="event.stopPropagation(); openThirdLevelFile('${folderItem.id}', '${item.id}', '${f.id}')">
-                      <div class="subfile-icon">${getIcon(f)}</div>
-                      <div class="item-name">${escapeHtml(f.name)}</div>
-                    </div>
-                  `).join('')
-                  : '<div class="empty-state" style="height:auto; padding:12px;">此子資料夾沒有文件</div>'
-                }
-              </div>
-            </div>
-          `;
-        }).join('');
-      }
-
-      function clearSecondPanel() {
-        document.getElementById('panel2Title').textContent = '第二階面板';
-        document.getElementById('panel2Subtitle').textContent = '請先點選第一階的主資料夾';
-        document.getElementById('panel2Body').innerHTML =
-          '<div class="empty-state">請先從第一階選擇一個主資料夾</div>';
-      }
-
-      function openSecondLevelFile(rootFolderId, fileId) {
-        const rootFolder = (knowledgeTree.items || []).find(x => x.id === rootFolderId);
-        if (!rootFolder) return;
-
-        const fileItem = (rootFolder.children || []).find(x => x.id === fileId && x.itemType === 'file');
-        if (!fileItem) return;
-
-        activeFileId = fileItem.id;
-        renderSecondPanel(rootFolder);
-        renderRootPanel();
-        openFile(fileItem);
-      }
-
-      function toggleSubfolder(rootFolderId, subfolderId) {
-        expandedSubfolders[subfolderId] = !expandedSubfolders[subfolderId];
-
-        const rootFolder = (knowledgeTree.items || []).find(x => x.id === rootFolderId);
-        if (!rootFolder) return;
-
-        renderSecondPanel(rootFolder);
-      }
-
-      function openThirdLevelFile(rootFolderId, subfolderId, fileId) {
-        const rootFolder = (knowledgeTree.items || []).find(x => x.id === rootFolderId);
-        if (!rootFolder) return;
-
-        const subfolder = (rootFolder.children || []).find(x => x.id === subfolderId && x.itemType === 'folder');
-        if (!subfolder) return;
-
-        const fileItem = (subfolder.children || []).find(x => x.id === fileId && x.itemType === 'file');
-        if (!fileItem) return;
-
-        activeFileId = fileItem.id;
-        expandedSubfolders[subfolderId] = true;
-
-        renderSecondPanel(rootFolder);
-        renderRootPanel();
-        openFile(fileItem);
-      }
-
-      function openFile(fileItem) {
-        document.getElementById('viewerTitle').textContent = fileItem.name;
-        document.getElementById('viewerMeta').textContent = 'Type: ' + (fileItem.fileType || 'file');
-
-        const btn = document.getElementById('openOriginalBtn');
-        btn.href = fileItem.openLink || fileItem.previewLink || '#';
-        btn.style.display = 'inline-block';
-
-        const viewer = document.getElementById('viewerCard');
-
-        if (fileItem.fileType === 'image') {
-          viewer.innerHTML = `
-            <img class="viewer-image" src="${escapeAttr(fileItem.previewLink)}" alt="${escapeAttr(fileItem.name)}">
-          `;
-          return;
-        }
-
-        viewer.innerHTML = `
-          <iframe class="viewer-frame" src="${escapeAttr(fileItem.previewLink)}" allowfullscreen></iframe>
+    return children.map(child => {
+      if (child.itemType === 'file') {
+        return `
+          <div class="tree-row ${child.id === activeFileId ? 'active' : ''}" onclick="openFileById('${child.id}')">
+            <div class="tree-toggle"></div>
+            <div class="tree-icon">${getIcon(child)}</div>
+            <div class="tree-name">${escapeHtml(child.name)}</div>
+          </div>
         `;
       }
 
-      function getIcon(item) {
-        if (item.itemType === 'folder') return '📁';
+      return `
+        <div class="tree-row ${child.id === activePanel2FolderId ? 'active' : ''}" onclick="selectSecondLevelFolder('${child.id}')">
+          <div class="tree-toggle"></div>
+          <div class="tree-icon">📁</div>
+          <div class="tree-name">${escapeHtml(child.name)}</div>
+        </div>
+      `;
+    }).join('');
+  }
 
-        switch (item.fileType) {
-          case 'doc': return '📄';
-          case 'slides': return '💡';
-          case 'sheet': return '📊';
-          case 'pdf': return '📕';
-          case 'image': return '🖼️';
-          case 'video': return '🎬';
-          default: return '📎';
-        }
+  function togglePanel1FirstLevelFolder(folderId) {
+    activePanel1FolderId = folderId;
+    expandedPanel1[folderId] = !expandedPanel1[folderId];
+
+    renderPanel1();
+
+    if (expandedPanel1[folderId] && !childrenCache[folderId]) {
+      const box = document.getElementById('panel1-children-' + folderId);
+      if (box) {
+        box.classList.add('expanded');
+        box.innerHTML = '<div class="tree-loading">讀取中...</div>';
       }
 
-      function escapeHtml(str) {
-        return String(str)
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;')
-          .replace(/'/g, '&#039;');
+      loadFolderChildren(folderId, function () {
+        renderPanel1();
+      });
+    }
+  }
+
+  function selectSecondLevelFolder(folderId) {
+    activePanel2FolderId = folderId;
+    activePanel1FolderId = folderId;
+
+    const folder = findFolderById(folderId);
+    document.getElementById('panel2Title').textContent = folder ? folder.name : '資料夾';
+    document.getElementById('panel2Subtitle').textContent = '顯示此資料夾內的第三層資料夾與文件';
+    document.getElementById('panel2Body').innerHTML = '<div class="tree-loading">讀取中...</div>';
+
+    renderPanel1();
+
+    if (!childrenCache[folderId]) {
+      loadFolderChildren(folderId, function () {
+        renderPanel1();
+        renderPanel2(folderId);
+      });
+    } else {
+      renderPanel2(folderId);
+    }
+  }
+
+  /* =========================
+     Panel 2
+     顯示第二層資料夾中的第三層資料夾與文件
+     第三層資料夾可展開第四層
+     第四層資料夾不支援繼續展開
+  ========================= */
+
+  function renderPanel2(folderId) {
+    const body = document.getElementById('panel2Body');
+    const items = childrenCache[folderId] || [];
+
+    if (!items.length) {
+      body.innerHTML = '<div class="empty-state">此資料夾尚無內容</div>';
+      return;
+    }
+
+    body.innerHTML = items.map(item => renderPanel2Item(item, 3)).join('');
+  }
+
+  function renderPanel2Item(item, level) {
+    if (item.itemType === 'file') {
+      return `
+        <div class="tree-row ${item.id === activeFileId ? 'active' : ''}" onclick="openFileById('${item.id}')">
+          <div class="tree-toggle"></div>
+          <div class="tree-icon">${getIcon(item)}</div>
+          <div class="tree-name">${escapeHtml(item.name)}</div>
+        </div>
+      `;
+    }
+
+    const expanded = !!expandedPanel2[item.id];
+
+    if (level >= 4) {
+      return `
+        <div class="tree-row" onclick="openFolderUnsupported('${item.id}', '${escapeAttr(item.name)}', '${escapeAttr(item.openLink || '#')}')">
+          <div class="tree-toggle"></div>
+          <div class="tree-icon">📁</div>
+          <div class="tree-name">${escapeHtml(item.name)}</div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="folder-block">
+        <div class="tree-row" onclick="togglePanel2Folder('${item.id}', ${level})">
+          <div class="tree-toggle">${expanded ? '▼' : '▶'}</div>
+          <div class="tree-icon">📁</div>
+          <div class="tree-name">${escapeHtml(item.name)}</div>
+        </div>
+
+        <div id="panel2-children-${item.id}" class="tree-children ${expanded ? 'expanded' : ''}">
+          ${expanded ? renderPanel2Children(item.id, level + 1) : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderPanel2Children(folderId, childLevel) {
+    if (!childrenCache[folderId]) {
+      return '<div class="tree-loading">讀取中...</div>';
+    }
+
+    const children = childrenCache[folderId];
+
+    if (!children.length) {
+      return '<div class="tree-empty">此資料夾沒有內容</div>';
+    }
+
+    return children.map(child => {
+      if (child.itemType === 'file') {
+        return `
+          <div class="tree-row ${child.id === activeFileId ? 'active' : ''}" onclick="openFileById('${child.id}')">
+            <div class="tree-toggle"></div>
+            <div class="tree-icon">${getIcon(child)}</div>
+            <div class="tree-name">${escapeHtml(child.name)}</div>
+          </div>
+        `;
       }
 
-      function escapeAttr(str) {
-        return escapeHtml(str);
+      return renderPanel2Item(child, childLevel);
+    }).join('');
+  }
+
+  function togglePanel2Folder(folderId, level) {
+    expandedPanel2[folderId] = !expandedPanel2[folderId];
+
+    renderPanel2(activePanel2FolderId);
+
+    if (expandedPanel2[folderId] && !childrenCache[folderId]) {
+      const box = document.getElementById('panel2-children-' + folderId);
+      if (box) {
+        box.classList.add('expanded');
+        box.innerHTML = '<div class="tree-loading">讀取中...</div>';
       }
 
-      window.onload = init;
-    </script>
+      loadFolderChildren(folderId, function () {
+        renderPanel2(activePanel2FolderId);
+      });
+    }
+  }
+
+  function loadFolderChildren(folderId, callback) {
+    google.script.run
+      .withSuccessHandler(function (data) {
+        childrenCache[folderId] = data || [];
+        if (callback) callback();
+      })
+      .withFailureHandler(function (err) {
+        alert('資料夾讀取失敗：' + (err.message || err));
+      })
+      .getFolderChildren(folderId);
+  }
+
+  function resetPanel2() {
+    activePanel2FolderId = null;
+    document.getElementById('panel2Title').textContent = '第二階面板';
+    document.getElementById('panel2Subtitle').textContent = '請先點選或展開第一階資料夾';
+    document.getElementById('panel2Body').innerHTML =
+      '<div class="empty-state">請先從第一階選擇一個資料夾</div>';
+  }
+
+  /* =========================
+     Search
+     只搜尋文件檔名
+  ========================= */
+
+  function handleSearchInput() {
+    const keyword = document.getElementById('searchInput').value.trim();
+    const clearBtn = document.getElementById('searchClearBtn');
+
+    clearBtn.classList.toggle('show', !!keyword);
+
+    if (!keyword) {
+      renderPanel1();
+      return;
+    }
+
+    resetPanel2();
+    renderSearchResults(keyword);
+  }
+
+  function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('searchClearBtn').classList.remove('show');
+    renderPanel1();
+    resetPanel2();
+  }
+
+  function renderSearchResults(keyword) {
+    const body = document.getElementById('panel1Body');
+    const lower = keyword.toLowerCase();
+
+    const results = (searchIndex || []).filter(file => {
+      const name = String(file.name || '').toLowerCase();
+      return name.includes(lower);
+    });
+
+    if (!results.length) {
+      body.innerHTML = '<div class="empty-state">找不到符合的文件</div>';
+      return;
+    }
+
+    body.innerHTML = results.map(file => `
+      <div class="search-result ${file.id === activeFileId ? 'active' : ''}" onclick="openSearchFile('${file.id}')">
+        <div class="item-icon">${getIcon(file)}</div>
+        <div class="search-result-content">
+          <div class="item-name">${escapeHtml(file.name)}</div>
+          <div class="search-path">${escapeHtml(file.path || '')}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function openSearchFile(fileId) {
+    const fileItem = (searchIndex || []).find(f => f.id === fileId);
+    if (!fileItem) return;
+
+    activeFileId = fileItem.id;
+    openFile(fileItem);
+
+    const keyword = document.getElementById('searchInput').value.trim();
+    if (keyword) renderSearchResults(keyword);
+  }
+
+  /* =========================
+     File / Folder Viewer
+  ========================= */
+
+  function openFileById(fileId) {
+    const fileItem = findFileById(fileId);
+    if (!fileItem) return;
+
+    activeFileId = fileItem.id;
+
+    const keyword = document.getElementById('searchInput').value.trim();
+    if (keyword) {
+      renderSearchResults(keyword);
+    } else {
+      renderPanel1();
+      if (activePanel2FolderId) renderPanel2(activePanel2FolderId);
+    }
+
+    openFile(fileItem);
+  }
+
+  function openFile(fileItem) {
+    document.getElementById('viewerTitle').textContent = fileItem.name;
+    document.getElementById('viewerMeta').textContent =
+      'Type: ' + (fileItem.fileType || 'file') + (fileItem.path ? '　｜　Path: ' + fileItem.path : '');
+
+    const btn = document.getElementById('openOriginalBtn');
+    btn.href = fileItem.openLink || fileItem.previewLink || '#';
+    btn.style.display = 'inline-block';
+
+    const viewer = document.getElementById('viewerCard');
+
+    if (fileItem.fileType === 'image') {
+      viewer.innerHTML = `
+        <img class="viewer-image" src="${escapeAttr(fileItem.previewLink)}" alt="${escapeAttr(fileItem.name)}">
+      `;
+      return;
+    }
+
+    viewer.innerHTML = `
+      <iframe class="viewer-frame" src="${escapeAttr(fileItem.previewLink)}" allowfullscreen></iframe>
+    `;
+  }
+
+  function openFolderUnsupported(folderId, folderName, folderLink) {
+    document.getElementById('viewerTitle').textContent = folderName;
+    document.getElementById('viewerMeta').textContent = 'Type: folder';
+
+    const btn = document.getElementById('openOriginalBtn');
+    btn.href = folderLink || '#';
+    btn.style.display = 'inline-block';
+
+    const viewer = document.getElementById('viewerCard');
+    viewer.innerHTML = `
+      <div class="unsupported-card">
+        <div class="unsupported-box">
+          <div class="unsupported-title">此層資料夾不支援在此介面繼續展開</div>
+          <div class="unsupported-text">
+            目前介面支援到第四層資料夾顯示。<br>
+            請點擊下方按鈕，前往 Google Drive 查看此資料夾內容。
+          </div>
+          <a class="viewer-btn" href="${escapeAttr(folderLink || '#')}" target="_blank">
+            Open this folder in Google Drive
+          </a>
+        </div>
+      </div>
+    `;
+  }
+
+  /* =========================
+     Find Helpers
+  ========================= */
+
+  function findFileById(fileId) {
+    const searchFile = (searchIndex || []).find(f => f.id === fileId);
+    if (searchFile) return searchFile;
+
+    const rootFound = findItemRecursive(rootItems, fileId, 'file');
+    if (rootFound) return rootFound;
+
+    for (const folderId in childrenCache) {
+      const found = findItemRecursive(childrenCache[folderId], fileId, 'file');
+      if (found) return found;
+    }
+
+    return null;
+  }
+
+  function findFolderById(folderId) {
+    const rootFound = findItemRecursive(rootItems, folderId, 'folder');
+    if (rootFound) return rootFound;
+
+    for (const id in childrenCache) {
+      const found = findItemRecursive(childrenCache[id], folderId, 'folder');
+      if (found) return found;
+    }
+
+    return null;
+  }
+
+  function findItemRecursive(items, targetId, itemType) {
+    for (const item of items || []) {
+      if (item.id === targetId && item.itemType === itemType) return item;
+
+      if (item.itemType === 'folder' && childrenCache[item.id]) {
+        const found = findItemRecursive(childrenCache[item.id], targetId, itemType);
+        if (found) return found;
+      }
+    }
+
+    return null;
+  }
+
+  /* =========================
+     Helpers
+  ========================= */
+
+  function getIcon(item) {
+    if (item.itemType === 'folder') return '📁';
+
+    switch (item.fileType) {
+      case 'doc': return '📄';
+      case 'slides': return '💡';
+      case 'sheet': return '📊';
+      case 'pdf': return '📕';
+      case 'image': return '🖼️';
+      case 'video': return '🎬';
+      default: return '📎';
+    }
+  }
+
+  function escapeHtml(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function escapeAttr(str) {
+    return escapeHtml(str);
+  }
+
+  window.onload = init;
+</script>
   </body>
 </html>
