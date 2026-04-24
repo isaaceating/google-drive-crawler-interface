@@ -1,45 +1,36 @@
 /**
  * Google Drive Crawler interface
- * Version: v1.7.1
+ * Version: v1.7.2
  *
  * Features:
  * 1. Lazy Load：Folder 展開時才讀取內容
- * 2. Search Index：全域搜尋只搜尋「文件檔名」
- * 3. Panel 1：顯示第 1 層，可展開第 2 層
- * 4. Panel 2：顯示選中第 2 層資料夾內容，可展開第 4 層
- * 5. 第 4 層資料夾不再繼續展開，改顯示不支援並提供 Google Drive 連結
+ * 2. Search Index：第一次搜尋時才建立 / 讀取 Index
+ * 3. Panel 1：顯示第一層資料夾與文件，第一層資料夾可展開第二層
+ * 4. Panel 2：顯示選中第二層資料夾中的第三層資料夾與文件
+ * 5. Panel 2 可展開第四層，第四層資料夾不繼續展開，改提供 Google Drive 連結
  */
 
 const ROOT_FOLDER_ID = '1zAFat5y1UL-vMqg5yQVy0SAgRD7WG0uY';
 
-const SEARCH_INDEX_CACHE_KEY = 'KNOWLEDGE_SEARCH_INDEX_V171';
+const SEARCH_INDEX_CACHE_KEY = 'KNOWLEDGE_SEARCH_INDEX_V172';
 const CACHE_TIME = 21600;
 
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('index')
-    .setTitle('Lumens 產品彈藥庫')
+    .setTitle('Solution 彈藥庫')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-/**
- * 初始只抓 Root 第一層
- */
 function getRootItems() {
   const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
   return getFolderItemsLazy_(root);
 }
 
-/**
- * Lazy Load：展開或選取 Folder 時才抓子層
- */
 function getFolderChildren(folderId) {
   const folder = DriveApp.getFolderById(folderId);
   return getFolderItemsLazy_(folder);
 }
 
-/**
- * 只抓指定資料夾的下一層，不遞迴
- */
 function getFolderItemsLazy_(folder) {
   const items = [];
 
@@ -66,10 +57,6 @@ function getFolderItemsLazy_(folder) {
   return items;
 }
 
-/**
- * 全域搜尋 Index
- * 注意：前端只比對文件檔名，不比對資料夾 path
- */
 function getSearchIndex() {
   const cache = CacheService.getScriptCache();
   const cached = cache.get(SEARCH_INDEX_CACHE_KEY);
@@ -89,10 +76,6 @@ function refreshSearchIndexCache() {
   CacheService.getScriptCache().remove(SEARCH_INDEX_CACHE_KEY);
 }
 
-/**
- * 建立搜尋用文件 Index
- * 只收 file，不收 folder
- */
 function getAllFilesRecursive_(folder, path) {
   const results = [];
 
