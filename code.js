@@ -1,23 +1,24 @@
 /**
  * Google Drive Crawler interface
- * Version: v1.7.2
+ * Version: v1.7.3
  *
  * Features:
  * 1. Lazy Load：Folder 展開時才讀取內容
  * 2. Search Index：第一次搜尋時才建立 / 讀取 Index
- * 3. Panel 1：顯示第一層資料夾與文件，第一層資料夾可展開第二層
- * 4. Panel 2：顯示選中第二層資料夾中的第三層資料夾與文件
- * 5. Panel 2 可展開第四層，第四層資料夾不繼續展開，改提供 Google Drive 連結
+ * 3. Language：?lang=en / ?lang=ch，預設英文
  */
 
 const ROOT_FOLDER_ID = '1zAFat5y1UL-vMqg5yQVy0SAgRD7WG0uY';
 
-const SEARCH_INDEX_CACHE_KEY = 'KNOWLEDGE_SEARCH_INDEX_V172';
+const SEARCH_INDEX_CACHE_KEY = 'KNOWLEDGE_SEARCH_INDEX_V173';
 const CACHE_TIME = 21600;
 
-function doGet() {
+function doGet(e) {
+  const lang = e && e.parameter && e.parameter.lang === 'ch' ? 'ch' : 'en';
+  const title = lang === 'ch' ? 'Solution 彈藥庫' : 'Solution Playbook';
+
   return HtmlService.createHtmlOutputFromFile('index')
-    .setTitle('Solution 彈藥庫')
+    .setTitle(title)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 

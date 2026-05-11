@@ -1,16 +1,11 @@
 <!DOCTYPE html>
 <!--
   Google Drive Crawler interface
-  範例: Solution 彈藥庫
-  Version: v1.7.2
-  搭配 Code.gs Version: v1.7.2
-
-  v1.7.2：
-  1. 初始載入不建立 Search Index
-  2. 使用者第一次搜尋時才載入 Search Index
-  3. Search Index 建立中，搜尋框顯示「搜尋索引建立中...」
-  4. Hover 與選取底色加深
-  5. 其他功能維持 v1.7.1 不變
+  Version: v1.7.3
+  Language:
+  - Default: English
+  - English: ?lang=en
+  - Chinese: ?lang=ch
 -->
 <html>
   <head>
@@ -18,9 +13,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <style>
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
 
       body {
         margin: 0;
@@ -72,9 +65,7 @@
       }
 
       @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
+        to { transform: rotate(360deg); }
       }
 
       .app {
@@ -92,17 +83,10 @@
         overflow: hidden;
       }
 
-      .panel-1 {
-        width: 330px;
-      }
+      .panel-1 { width: 330px; }
+      .panel-2 { width: 330px; }
 
-      .panel-2 {
-        width: 330px;
-      }
-
-      .panel.collapsed {
-        width: 44px !important;
-      }
+      .panel.collapsed { width: 44px !important; }
 
       .panel-header {
         display: flex;
@@ -190,9 +174,7 @@
         font-size: 13px;
       }
 
-      .search-clear.show {
-        display: block;
-      }
+      .search-clear.show { display: block; }
 
       .panel-body {
         flex: 1;
@@ -257,13 +239,9 @@
         display: none;
       }
 
-      .tree-children.expanded {
-        display: block;
-      }
+      .tree-children.expanded { display: block; }
 
-      .folder-block {
-        margin-bottom: 4px;
-      }
+      .folder-block { margin-bottom: 4px; }
 
       .tree-loading,
       .tree-empty {
@@ -324,9 +302,7 @@
         font-size: 13px;
       }
 
-      .viewer-btn:hover {
-        background: #1e40af;
-      }
+      .viewer-btn:hover { background: #1e40af; }
 
       .viewer-body {
         flex: 1;
@@ -377,9 +353,7 @@
         color: #374151;
       }
 
-      .unsupported-box {
-        max-width: 520px;
-      }
+      .unsupported-box { max-width: 520px; }
 
       .unsupported-title {
         font-size: 22px;
@@ -424,10 +398,10 @@
     <div id="loadingOverlay" class="loading-overlay">
       <div class="loading-box">
         <div class="loading-spinner"></div>
-        <div class="loading-title">讀取文件資料夾中</div>
-        <div class="loading-text">
-          正在載入資料，可能需要 20–30 秒。<br>
-          讀取完成後將自動關閉。
+        <div id="loadingTitle" class="loading-title">Loading folders</div>
+        <div id="loadingText" class="loading-text">
+          Loading folder data. This may take 20–30 seconds.<br>
+          The window will close automatically when ready.
         </div>
       </div>
     </div>
@@ -436,8 +410,8 @@
       <aside id="panel1" class="panel panel-1">
         <div class="panel-header">
           <div class="panel-title-wrap">
-            <div class="panel-title">Solution 彈藥庫</div>
-            <div class="panel-subtitle">第一層 / 第二層</div>
+            <div id="appTitle" class="panel-title">Solution Playbook</div>
+            <div id="panel1Subtitle" class="panel-subtitle">Level 1 / Level 2</div>
           </div>
           <button class="toggle-btn" onclick="togglePanel('panel1', this)">«</button>
         </div>
@@ -448,7 +422,7 @@
               id="searchInput"
               class="search-input"
               type="text"
-              placeholder="搜尋所有文件..."
+              placeholder="Search all files..."
               oninput="handleSearchInput()"
             />
             <button id="searchClearBtn" class="search-clear" onclick="clearSearch()">×</button>
@@ -456,28 +430,28 @@
         </div>
 
         <div id="panel1Body" class="panel-body"></div>
-        <div class="collapsed-placeholder">第一階</div>
+        <div id="panel1Collapsed" class="collapsed-placeholder">Panel 1</div>
       </aside>
 
       <aside id="panel2" class="panel panel-2">
         <div class="panel-header">
           <div class="panel-title-wrap">
-            <div id="panel2Title" class="panel-title">第二階面板</div>
-            <div id="panel2Subtitle" class="panel-subtitle">請先點選或展開第一階資料夾</div>
+            <div id="panel2Title" class="panel-title">Second Panel</div>
+            <div id="panel2Subtitle" class="panel-subtitle">Select or expand a folder from Panel 1</div>
           </div>
           <button class="toggle-btn" onclick="togglePanel('panel2', this)">«</button>
         </div>
 
         <div id="panel2Body" class="panel-body">
-          <div class="empty-state">請先從第一階選擇一個資料夾</div>
+          <div class="empty-state">Select a folder from Panel 1 first</div>
         </div>
-        <div class="collapsed-placeholder">第二階</div>
+        <div id="panel2Collapsed" class="collapsed-placeholder">Panel 2</div>
       </aside>
 
       <main class="viewer-area">
         <div class="viewer-header">
-          <h1 id="viewerTitle" class="viewer-title">請選擇文件</h1>
-          <div id="viewerMeta" class="viewer-meta">左側點擊文件後，會在這裡顯示內容</div>
+          <h1 id="viewerTitle" class="viewer-title">Select a file</h1>
+          <div id="viewerMeta" class="viewer-meta">Click a file on the left to preview it here</div>
           <div class="viewer-actions">
             <a id="openOriginalBtn" class="viewer-btn" href="#" target="_blank" style="display:none;">
               Open in Google Drive
@@ -487,13 +461,92 @@
 
         <div class="viewer-body">
           <div id="viewerCard" class="viewer-card">
-            <div class="empty-state">請從左側面板選擇要顯示的文件</div>
+            <div class="empty-state">Select a file from the left panel to preview it</div>
           </div>
         </div>
       </main>
     </div>
 
     <script>
+      const LANG = getLang();
+
+      const I18N = {
+        en: {
+          appTitle: 'Solution Playbook',
+          panel1Subtitle: 'Level 1 / Level 2',
+          panel2DefaultTitle: 'Second Panel',
+          panel2DefaultSubtitle: 'Select or expand a folder from Panel 1',
+          panel2FolderSubtitle: 'Showing level 3 folders and files in this folder',
+          panel1Collapsed: 'Panel 1',
+          panel2Collapsed: 'Panel 2',
+          loadingTitle: 'Loading folders',
+          loadingText: 'Loading folder data. This may take 20–30 seconds.<br>The window will close automatically when ready.',
+          searchPlaceholder: 'Search all files...',
+          searchIndexPlaceholder: 'Building search index...',
+          searchIndexPanel: 'Building search index, please wait...',
+          searchIndexLoading: 'Building search index...',
+          searchIndexFailed: 'Search index failed: ',
+          loadFailed: 'Load failed: ',
+          folderLoadFailed: 'Folder loading failed: ',
+          noData: 'No data found',
+          folderEmpty: 'This folder is empty',
+          loading: 'Loading...',
+          noSearchResult: 'No matching files found',
+          panel2Empty: 'Select a folder from Panel 1 first',
+          viewerDefaultTitle: 'Select a file',
+          viewerDefaultMeta: 'Click a file on the left to preview it here',
+          viewerDefaultBody: 'Select a file from the left panel to preview it',
+          unsupportedTitle: 'This folder level is not supported in this interface',
+          unsupportedText: 'This interface supports folder display up to level 4.<br>Please open this folder in Google Drive to view its contents.',
+          unsupportedBtn: 'Open this folder in Google Drive',
+          type: 'Type',
+          path: 'Path',
+          openDrive: 'Open in Google Drive'
+        },
+        ch: {
+          appTitle: 'Solution 彈藥庫',
+          panel1Subtitle: '第一層 / 第二層',
+          panel2DefaultTitle: '第二階面板',
+          panel2DefaultSubtitle: '請先點選或展開第一階資料夾',
+          panel2FolderSubtitle: '顯示此資料夾內的第三層資料夾與文件',
+          panel1Collapsed: '第一階',
+          panel2Collapsed: '第二階',
+          loadingTitle: '讀取文件資料夾中',
+          loadingText: '正在載入資料，可能需要 20–30 秒。<br>讀取完成後將自動關閉。',
+          searchPlaceholder: '搜尋所有文件...',
+          searchIndexPlaceholder: '搜尋索引建立中...',
+          searchIndexPanel: '搜尋索引建立中，請稍候...',
+          searchIndexLoading: '搜尋索引建立中...',
+          searchIndexFailed: '搜尋索引建立失敗：',
+          loadFailed: '載入失敗：',
+          folderLoadFailed: '資料夾讀取失敗：',
+          noData: '目前沒有資料',
+          folderEmpty: '此資料夾沒有內容',
+          loading: '讀取中...',
+          noSearchResult: '找不到符合的文件',
+          panel2Empty: '請先從第一階選擇一個資料夾',
+          viewerDefaultTitle: '請選擇文件',
+          viewerDefaultMeta: '左側點擊文件後，會在這裡顯示內容',
+          viewerDefaultBody: '請從左側面板選擇要顯示的文件',
+          unsupportedTitle: '此層資料夾不支援在此介面繼續展開',
+          unsupportedText: '目前介面支援到第四層資料夾顯示。<br>請點擊下方按鈕，前往 Google Drive 查看此資料夾內容。',
+          unsupportedBtn: 'Open this folder in Google Drive',
+          type: 'Type',
+          path: 'Path',
+          openDrive: 'Open in Google Drive'
+        }
+      };
+
+      function getLang() {
+        const params = new URLSearchParams(window.location.search);
+        const lang = params.get('lang');
+        return lang === 'ch' ? 'ch' : 'en';
+      }
+
+      function t(key) {
+        return I18N[LANG][key] || I18N.en[key] || key;
+      }
+
       let rootItems = [];
       let searchIndex = [];
       let searchIndexLoaded = false;
@@ -501,7 +554,6 @@
       let pendingSearchKeyword = '';
 
       let childrenCache = {};
-
       let expandedPanel1 = {};
       let expandedPanel2 = {};
 
@@ -510,12 +562,33 @@
       let activePanel2FolderId = null;
 
       function init() {
+        applyLanguage();
         showLoading();
 
         google.script.run
           .withSuccessHandler(onRootLoaded)
           .withFailureHandler(onLoadError)
           .getRootItems();
+      }
+
+      function applyLanguage() {
+        document.documentElement.lang = LANG === 'ch' ? 'zh-Hant' : 'en';
+
+        document.getElementById('appTitle').textContent = t('appTitle');
+        document.getElementById('panel1Subtitle').textContent = t('panel1Subtitle');
+        document.getElementById('panel2Title').textContent = t('panel2DefaultTitle');
+        document.getElementById('panel2Subtitle').textContent = t('panel2DefaultSubtitle');
+        document.getElementById('panel1Collapsed').textContent = t('panel1Collapsed');
+        document.getElementById('panel2Collapsed').textContent = t('panel2Collapsed');
+        document.getElementById('loadingTitle').textContent = t('loadingTitle');
+        document.getElementById('loadingText').innerHTML = t('loadingText');
+        document.getElementById('searchInput').placeholder = t('searchPlaceholder');
+        document.getElementById('viewerTitle').textContent = t('viewerDefaultTitle');
+        document.getElementById('viewerMeta').textContent = t('viewerDefaultMeta');
+        document.getElementById('openOriginalBtn').textContent = t('openDrive');
+        document.getElementById('viewerCard').innerHTML =
+          '<div class="empty-state">' + t('viewerDefaultBody') + '</div>';
+        resetPanel2();
       }
 
       function showLoading() {
@@ -538,7 +611,7 @@
       function onLoadError(err) {
         hideLoading();
         document.getElementById('panel1Body').innerHTML =
-          '<div class="empty-state">載入失敗：' + escapeHtml(err.message || err) + '</div>';
+          '<div class="empty-state">' + t('loadFailed') + escapeHtml(err.message || err) + '</div>';
       }
 
       function togglePanel(panelId, btn) {
@@ -551,7 +624,7 @@
         const body = document.getElementById('panel1Body');
 
         if (!rootItems.length) {
-          body.innerHTML = '<div class="empty-state">目前沒有資料</div>';
+          body.innerHTML = '<div class="empty-state">' + t('noData') + '</div>';
           return;
         }
 
@@ -588,13 +661,13 @@
 
       function renderPanel1SecondLevelList(folderId) {
         if (!childrenCache[folderId]) {
-          return '<div class="tree-loading">讀取中...</div>';
+          return '<div class="tree-loading">' + t('loading') + '</div>';
         }
 
         const children = childrenCache[folderId];
 
         if (!children.length) {
-          return '<div class="tree-empty">此資料夾沒有內容</div>';
+          return '<div class="tree-empty">' + t('folderEmpty') + '</div>';
         }
 
         return children.map(child => {
@@ -628,7 +701,7 @@
           const box = document.getElementById('panel1-children-' + folderId);
           if (box) {
             box.classList.add('expanded');
-            box.innerHTML = '<div class="tree-loading">讀取中...</div>';
+            box.innerHTML = '<div class="tree-loading">' + t('loading') + '</div>';
           }
 
           loadFolderChildren(folderId, function () {
@@ -642,9 +715,9 @@
         activePanel1FolderId = folderId;
 
         const folder = findFolderById(folderId);
-        document.getElementById('panel2Title').textContent = folder ? folder.name : '資料夾';
-        document.getElementById('panel2Subtitle').textContent = '顯示此資料夾內的第三層資料夾與文件';
-        document.getElementById('panel2Body').innerHTML = '<div class="tree-loading">讀取中...</div>';
+        document.getElementById('panel2Title').textContent = folder ? folder.name : 'Folder';
+        document.getElementById('panel2Subtitle').textContent = t('panel2FolderSubtitle');
+        document.getElementById('panel2Body').innerHTML = '<div class="tree-loading">' + t('loading') + '</div>';
 
         renderPanel1();
 
@@ -663,7 +736,7 @@
         const items = childrenCache[folderId] || [];
 
         if (!items.length) {
-          body.innerHTML = '<div class="empty-state">此資料夾尚無內容</div>';
+          body.innerHTML = '<div class="empty-state">' + t('folderEmpty') + '</div>';
           return;
         }
 
@@ -710,13 +783,13 @@
 
       function renderPanel2Children(folderId, childLevel) {
         if (!childrenCache[folderId]) {
-          return '<div class="tree-loading">讀取中...</div>';
+          return '<div class="tree-loading">' + t('loading') + '</div>';
         }
 
         const children = childrenCache[folderId];
 
         if (!children.length) {
-          return '<div class="tree-empty">此資料夾沒有內容</div>';
+          return '<div class="tree-empty">' + t('folderEmpty') + '</div>';
         }
 
         return children.map(child => {
@@ -743,7 +816,7 @@
           const box = document.getElementById('panel2-children-' + folderId);
           if (box) {
             box.classList.add('expanded');
-            box.innerHTML = '<div class="tree-loading">讀取中...</div>';
+            box.innerHTML = '<div class="tree-loading">' + t('loading') + '</div>';
           }
 
           loadFolderChildren(folderId, function () {
@@ -759,17 +832,21 @@
             if (callback) callback();
           })
           .withFailureHandler(function (err) {
-            alert('資料夾讀取失敗：' + (err.message || err));
+            alert(t('folderLoadFailed') + (err.message || err));
           })
           .getFolderChildren(folderId);
       }
 
       function resetPanel2() {
+        const title = document.getElementById('panel2Title');
+        const subtitle = document.getElementById('panel2Subtitle');
+        const body = document.getElementById('panel2Body');
+
+        if (title) title.textContent = t('panel2DefaultTitle');
+        if (subtitle) subtitle.textContent = t('panel2DefaultSubtitle');
+        if (body) body.innerHTML = '<div class="empty-state">' + t('panel2Empty') + '</div>';
+
         activePanel2FolderId = null;
-        document.getElementById('panel2Title').textContent = '第二階面板';
-        document.getElementById('panel2Subtitle').textContent = '請先點選或展開第一階資料夾';
-        document.getElementById('panel2Body').innerHTML =
-          '<div class="empty-state">請先從第一階選擇一個資料夾</div>';
       }
 
       function handleSearchInput() {
@@ -798,7 +875,7 @@
       function loadSearchIndexFirstTime() {
         if (searchIndexLoading) {
           document.getElementById('panel1Body').innerHTML =
-            '<div class="empty-state">搜尋索引建立中...</div>';
+            '<div class="empty-state">' + t('searchIndexLoading') + '</div>';
           return;
         }
 
@@ -806,10 +883,10 @@
 
         const input = document.getElementById('searchInput');
         input.disabled = true;
-        input.placeholder = '搜尋索引建立中...';
+        input.placeholder = t('searchIndexPlaceholder');
 
         document.getElementById('panel1Body').innerHTML =
-          '<div class="empty-state">搜尋索引建立中，請稍候...</div>';
+          '<div class="empty-state">' + t('searchIndexPanel') + '</div>';
 
         google.script.run
           .withSuccessHandler(function (data) {
@@ -818,7 +895,7 @@
             searchIndexLoading = false;
 
             input.disabled = false;
-            input.placeholder = '搜尋所有文件...';
+            input.placeholder = t('searchPlaceholder');
             input.focus();
 
             const latestKeyword = input.value.trim() || pendingSearchKeyword;
@@ -831,10 +908,10 @@
           .withFailureHandler(function (err) {
             searchIndexLoading = false;
             input.disabled = false;
-            input.placeholder = '搜尋所有文件...';
+            input.placeholder = t('searchPlaceholder');
 
             document.getElementById('panel1Body').innerHTML =
-              '<div class="empty-state">搜尋索引建立失敗：' + escapeHtml(err.message || err) + '</div>';
+              '<div class="empty-state">' + t('searchIndexFailed') + escapeHtml(err.message || err) + '</div>';
           })
           .getSearchIndex();
       }
@@ -842,7 +919,7 @@
       function clearSearch() {
         const input = document.getElementById('searchInput');
         input.value = '';
-        input.placeholder = '搜尋所有文件...';
+        input.placeholder = t('searchPlaceholder');
         input.disabled = false;
 
         pendingSearchKeyword = '';
@@ -863,7 +940,7 @@
         });
 
         if (!results.length) {
-          body.innerHTML = '<div class="empty-state">找不到符合的文件</div>';
+          body.innerHTML = '<div class="empty-state">' + t('noSearchResult') + '</div>';
           return;
         }
 
@@ -909,10 +986,11 @@
       function openFile(fileItem) {
         document.getElementById('viewerTitle').textContent = fileItem.name;
         document.getElementById('viewerMeta').textContent =
-          'Type: ' + (fileItem.fileType || 'file') + (fileItem.path ? '　｜　Path: ' + fileItem.path : '');
+          t('type') + ': ' + (fileItem.fileType || 'file') + (fileItem.path ? '　｜　' + t('path') + ': ' + fileItem.path : '');
 
         const btn = document.getElementById('openOriginalBtn');
         btn.href = fileItem.openLink || fileItem.previewLink || '#';
+        btn.textContent = t('openDrive');
         btn.style.display = 'inline-block';
 
         const viewer = document.getElementById('viewerCard');
@@ -931,23 +1009,21 @@
 
       function openFolderUnsupported(folderId, folderName, folderLink) {
         document.getElementById('viewerTitle').textContent = folderName;
-        document.getElementById('viewerMeta').textContent = 'Type: folder';
+        document.getElementById('viewerMeta').textContent = t('type') + ': folder';
 
         const btn = document.getElementById('openOriginalBtn');
         btn.href = folderLink || '#';
+        btn.textContent = t('openDrive');
         btn.style.display = 'inline-block';
 
         const viewer = document.getElementById('viewerCard');
         viewer.innerHTML = `
           <div class="unsupported-card">
             <div class="unsupported-box">
-              <div class="unsupported-title">此層資料夾不支援在此介面繼續展開</div>
-              <div class="unsupported-text">
-                目前介面支援到第四層資料夾顯示。<br>
-                請點擊下方按鈕，前往 Google Drive 查看此資料夾內容。
-              </div>
+              <div class="unsupported-title">${t('unsupportedTitle')}</div>
+              <div class="unsupported-text">${t('unsupportedText')}</div>
               <a class="viewer-btn" href="${escapeAttr(folderLink || '#')}" target="_blank">
-                Open this folder in Google Drive
+                ${t('unsupportedBtn')}
               </a>
             </div>
           </div>
