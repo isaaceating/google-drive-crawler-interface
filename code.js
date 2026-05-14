@@ -1,21 +1,50 @@
 /**
  * Google Drive Crawler interface
- * Version: v2.1.1
+ * Version: v2.2.2
+ *
+ * Fix:
+ * 1. 修正 ?playbook=product / ?playbook=presales 仍顯示 Solution 的問題
+ * 2. doGet(e) 改用 HtmlService.createTemplateFromFile()
+ * 3. 由後端直接注入 INITIAL_PLAYBOOK / INITIAL_LANG 到 index.html
  *
  * Features:
- * 1. Google Sheet Snapshot：前台瀏覽與搜尋改讀 Snapshot Sheet，不再即時掃 Drive
- * 2. Full Snapshot Preload：開頁時一次載入完整 Snapshot，點資料夾不再呼叫後端
- * 3. Frontend Parent Map：前端建立 parentId map，資料夾切換接近秒開
- * 4. Root Items Fix：後端直接回傳 rootItems，避免第一層顯示空白
- * 5. Manual Refresh：前台按 Refresh Database 可手動重建 Snapshot
- * 6. Daily Auto Refresh：可建立每日自動重建 Snapshot trigger
- * 7. Language：?lang=en / ?lang=ch，預設英文
+ * 1. Multi-Playbook Snapshot：支援 ?playbook=product / solution / presales
+ * 2. Google Sheet Snapshot：每個 playbook 對應一個 Snapshot tab
+ * 3. Full Snapshot Preload：開頁時一次載入目前 playbook 的完整 Snapshot
+ * 4. Frontend Parent Map：點資料夾不再呼叫後端
+ * 5. Manual Refresh：只 refresh 目前 playbook 的 Snapshot tab
+ * 6. Daily Auto Refresh：可每日 refresh 所有 playbook Snapshot tabs
+ * 7. Title Sync：標題依 playbook 自動切換
+ * 8. Language：?lang=en / ?lang=ch，預設英文
  */
 
-const ROOT_FOLDER_ID = '1XtR0qP5DJIQ6jIL6Vh8hhAhJa-wdLVDL';
-
 const SNAPSHOT_SPREADSHEET_ID = '1JjQ2NAWGLUbIZsc9XjaONGJYyermwE4tigNRTOoHfrY';
-const SNAPSHOT_SHEET_NAME = 'Snapshot';
+
+const DEFAULT_PLAYBOOK = 'solution';
+
+const PLAYBOOK_CONFIG = {
+  product: {
+    key: 'product',
+    titleEn: 'Product Playbook',
+    titleCh: 'Product 彈藥庫',
+    rootFolderId: '1zAFat5y1UL-vMqg5yQVy0SAgRD7WG0uY',
+    sheetName: 'Snapshot_Product'
+  },
+  solution: {
+    key: 'solution',
+    titleEn: 'Solution Playbook',
+    titleCh: 'Solution 彈藥庫',
+    rootFolderId: '1XtR0qP5DJIQ6jIL6Vh8hhAhJa-wdLVDL',
+    sheetName: 'Snapshot_Solution'
+  },
+  presales: {
+    key: 'presales',
+    titleEn: 'Pre-sales Playbook',
+    titleCh: 'Pre-sales 彈藥庫',
+    rootFolderId: '1ltBQJqMoey5jHkRaqjWvRJgL18rXDqLT',
+    sheetName: 'Snapshot_PreSales'
+  }
+};
 
 const SNAPSHOT_HEADERS = [
   'id',
@@ -33,25 +62,37 @@ const SNAPSHOT_HEADERS = [
 
 function doGet(e) {
   const lang = e && e.parameter && e.parameter.lang === 'ch' ? 'ch' : 'en';
-  const title = lang === 'ch' ? 'Solution 彈藥庫' : 'Solution Playbook';
+  const playbookKey = normalizePlaybookKey_(e && e.parameter && e.parameter.playbook);
+  const config = getPlaybookConfig_(playbookKey);
+  const title = lang === 'ch' ? config.titleCh : config.titleEn;
 
-  return HtmlService.createHtmlOutputFromFile('index')
+  const template = HtmlService.createTemplateFromFile('index');
+
+  template.INITIAL_PLAYBOOK = config.key;
+  template.INITIAL_LANG = lang;
+  template.INITIAL_TITLE_EN = config.titleEn;
+  template.INITIAL_TITLE_CH = config.titleCh;
+
+  return template.evaluate()
     .setTitle(title)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 /**
- * v2.1.1 Frontend API：
- * 開頁時一次回傳完整 Snapshot payload
- * 直接包含 rootItems，避免前端第一層 mapping 失敗
+ * Frontend API：
+ * 開頁時一次回傳目前 playbook 的完整 Snapshot payload
  */
-function getFullSnapshotPayload() {
-  const sheet = getSnapshotSheet_();
+function getFullSnapshotPayload(playbookKey) {
+  const config = getPlaybookConfig_(playbookKey);
+  const sheet = getSnapshotSheet_(config.sheetName);
   const values = sheet.getDataRange().getValues();
 
   if (values.length <= 1) {
     return {
-      rootFolderId: ROOT_FOLDER_ID,
+      playbookKey: config.key,
+      titleEn: config.titleEn,
+      titleCh: config.titleCh,
+      rootFolderId: config.rootFolderId,
       rootItems: [],
       items: [],
       updatedAt: '',
@@ -80,7 +121,7 @@ function getFullSnapshotPayload() {
 
   items.sort(sortItems_);
 
-  let rootItems = items.filter(item => item.parentId === ROOT_FOLDER_ID);
+  let rootItems = items.filter(item => item.parentId === config.rootFolderId);
 
   // Fallback：如果 parentId 沒對上，就用 level 1 當第一層
   if (!rootItems.length) {
@@ -92,7 +133,10 @@ function getFullSnapshotPayload() {
   const updatedAt = getLatestUpdatedAtString_(rows, idx);
 
   return {
-    rootFolderId: ROOT_FOLDER_ID,
+    playbookKey: config.key,
+    titleEn: config.titleEn,
+    titleCh: config.titleCh,
+    rootFolderId: config.rootFolderId,
     rootItems: rootItems,
     items: items,
     updatedAt: updatedAt,
@@ -101,62 +145,70 @@ function getFullSnapshotPayload() {
 }
 
 /**
- * v2.0 相容 API：
- * 保留給測試或舊版前端使用
+ * Frontend API：
+ * 手動刷新目前 playbook 的 Snapshot tab
  */
-function getRootItems() {
-  return getSnapshotChildren_(ROOT_FOLDER_ID);
-}
-
-function getFolderChildren(folderId) {
-  return getSnapshotChildren_(folderId);
-}
-
-/**
- * v2.0 相容 API：
- * v2.1.1 前端已在開頁時載入 searchIndex，正常不會再呼叫這個 function
- */
-function getSearchIndex() {
-  const payload = getFullSnapshotPayload();
-
-  return payload.items
-    .filter(item => item.itemType === 'file')
-    .sort(sortItems_);
-}
-
-/**
- * Frontend API：手動刷新 Snapshot
- */
-function refreshSnapshotManual() {
-  rebuildSnapshot();
+function refreshSnapshotManual(playbookKey) {
+  const result = rebuildSnapshotByPlaybook(playbookKey);
 
   return {
     success: true,
-    message: 'Database refreshed successfully.'
+    playbookKey: result.playbookKey,
+    message: 'Database refreshed successfully.',
+    rowCount: result.rowCount,
+    updatedAt: result.updatedAt
   };
 }
 
 /**
+ * 手動重建指定 playbook Snapshot
+ * 測試用：
+ * rebuildSnapshotByPlaybook('product')
+ * rebuildSnapshotByPlaybook('solution')
+ * rebuildSnapshotByPlaybook('presales')
+ */
+function rebuildSnapshotByPlaybook(playbookKey) {
+  const config = getPlaybookConfig_(playbookKey);
+  return rebuildSnapshot_(config);
+}
+
+/**
+ * Daily Auto Refresh：
+ * 每日刷新全部 playbook Snapshot tabs
+ */
+function dailyRefreshAllSnapshots() {
+  return rebuildAllSnapshots();
+}
+
+/**
+ * 手動執行：一次刷新全部 playbook Snapshot tabs
+ */
+function rebuildAllSnapshots() {
+  const results = [];
+
+  Object.keys(PLAYBOOK_CONFIG).forEach(key => {
+    const config = PLAYBOOK_CONFIG[key];
+    const result = rebuildSnapshot_(config);
+    results.push(result);
+  });
+
+  return results;
+}
+
+/**
  * 手動執行一次這個 function，可建立每日自動刷新 trigger
- * 預設每天早上 6 點重建 Snapshot
+ * 預設每天早上 6 點重建全部 Snapshot tabs
  */
 function createDailySnapshotTrigger() {
   deleteSnapshotTriggers_();
 
-  ScriptApp.newTrigger('dailyRefreshSnapshot')
+  ScriptApp.newTrigger('dailyRefreshAllSnapshots')
     .timeBased()
     .everyDays(1)
     .atHour(6)
     .create();
 
   return 'Daily Snapshot trigger created successfully.';
-}
-
-/**
- * 每日自動刷新 trigger 呼叫這個 function
- */
-function dailyRefreshSnapshot() {
-  rebuildSnapshot();
 }
 
 /**
@@ -168,16 +220,37 @@ function deleteDailySnapshotTrigger() {
 }
 
 /**
- * 核心：重建 Snapshot
+ * 相容 API：
+ * 預設讀 solution
  */
-function rebuildSnapshot() {
-  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+function getRootItems() {
+  const config = getPlaybookConfig_(DEFAULT_PLAYBOOK);
+  return getSnapshotChildren_(config, config.rootFolderId);
+}
+
+function getFolderChildren(folderId) {
+  const config = getPlaybookConfig_(DEFAULT_PLAYBOOK);
+  return getSnapshotChildren_(config, folderId);
+}
+
+function getSearchIndex() {
+  const payload = getFullSnapshotPayload(DEFAULT_PLAYBOOK);
+  return payload.items
+    .filter(item => item.itemType === 'file')
+    .sort(sortItems_);
+}
+
+/**
+ * 核心：依 playbook config 重建 Snapshot
+ */
+function rebuildSnapshot_(config) {
+  const root = DriveApp.getFolderById(config.rootFolderId);
   const rows = [];
   const now = new Date();
 
   crawlFolderToSnapshot_(
     root,
-    ROOT_FOLDER_ID,
+    config.rootFolderId,
     root.getName(),
     1,
     rows,
@@ -201,7 +274,7 @@ function rebuildSnapshot() {
     return String(a[2] || '').localeCompare(String(b[2] || ''), 'zh-Hant');
   });
 
-  const sheet = getSnapshotSheet_();
+  const sheet = getSnapshotSheet_(config.sheetName);
 
   sheet.clearContents();
   sheet.getRange(1, 1, 1, SNAPSHOT_HEADERS.length).setValues([SNAPSHOT_HEADERS]);
@@ -214,17 +287,23 @@ function rebuildSnapshot() {
 
   return {
     success: true,
+    playbookKey: config.key,
+    sheetName: config.sheetName,
     rowCount: rows.length,
-    updatedAt: now
+    updatedAt: Utilities.formatDate(
+      now,
+      Session.getScriptTimeZone(),
+      'yyyy-MM-dd HH:mm'
+    )
   };
 }
 
 /**
  * 從 Snapshot Sheet 讀取指定 parentId 的子項目
- * v2.1.1 前端不再主要使用，但保留相容
+ * v2.2.2 前端不再主要使用，但保留相容與測試
  */
-function getSnapshotChildren_(parentId) {
-  const sheet = getSnapshotSheet_();
+function getSnapshotChildren_(config, parentId) {
+  const sheet = getSnapshotSheet_(config.sheetName);
   const values = sheet.getDataRange().getValues();
 
   if (values.length <= 1) return [];
@@ -308,16 +387,40 @@ function crawlFolderToSnapshot_(folder, parentId, path, level, rows, now) {
 /**
  * 取得 Snapshot Sheet，沒有就自動建立
  */
-function getSnapshotSheet_() {
+function getSnapshotSheet_(sheetName) {
   const ss = SpreadsheetApp.openById(SNAPSHOT_SPREADSHEET_ID);
-  let sheet = ss.getSheetByName(SNAPSHOT_SHEET_NAME);
+  let sheet = ss.getSheetByName(sheetName);
 
   if (!sheet) {
-    sheet = ss.insertSheet(SNAPSHOT_SHEET_NAME);
+    sheet = ss.insertSheet(sheetName);
     sheet.getRange(1, 1, 1, SNAPSHOT_HEADERS.length).setValues([SNAPSHOT_HEADERS]);
   }
 
   return sheet;
+}
+
+/**
+ * 取得 playbook config
+ */
+function getPlaybookConfig_(playbookKey) {
+  const key = normalizePlaybookKey_(playbookKey);
+  return PLAYBOOK_CONFIG[key] || PLAYBOOK_CONFIG[DEFAULT_PLAYBOOK];
+}
+
+/**
+ * 正規化 playbook key
+ */
+function normalizePlaybookKey_(playbookKey) {
+  const key = String(playbookKey || DEFAULT_PLAYBOOK)
+    .toLowerCase()
+    .trim()
+    .replace(/_/g, '-');
+
+  if (key === 'pre-sales') return 'presales';
+  if (key === 'pre_sales') return 'presales';
+  if (key === 'pre') return 'presales';
+
+  return PLAYBOOK_CONFIG[key] ? key : DEFAULT_PLAYBOOK;
 }
 
 /**
@@ -378,7 +481,7 @@ function deleteSnapshotTriggers_() {
   triggers.forEach(trigger => {
     const fn = trigger.getHandlerFunction();
 
-    if (fn === 'dailyRefreshSnapshot') {
+    if (fn === 'dailyRefreshAllSnapshots') {
       ScriptApp.deleteTrigger(trigger);
     }
   });
@@ -416,11 +519,12 @@ function buildPreviewLink_(file, type) {
 }
 
 /**
- * 測試用：確認 Snapshot payload 是否有資料
+ * 測試用：確認指定 playbook Snapshot payload 是否有資料
  */
 function testSnapshotPayload() {
-  const payload = getFullSnapshotPayload();
+  const payload = getFullSnapshotPayload(DEFAULT_PLAYBOOK);
 
+  Logger.log('Playbook: ' + payload.playbookKey);
   Logger.log('Root Folder ID: ' + payload.rootFolderId);
   Logger.log('Total Items: ' + payload.items.length);
   Logger.log('Root Items: ' + payload.rootItems.length);
@@ -429,4 +533,24 @@ function testSnapshotPayload() {
   if (payload.rootItems.length > 0) {
     Logger.log('First Root Item: ' + payload.rootItems[0].name);
   }
+}
+
+/**
+ * 測試用：確認全部 playbook Snapshot payload
+ */
+function testAllSnapshotPayloads() {
+  Object.keys(PLAYBOOK_CONFIG).forEach(key => {
+    const payload = getFullSnapshotPayload(key);
+
+    Logger.log('======================');
+    Logger.log('Playbook: ' + payload.playbookKey);
+    Logger.log('Root Folder ID: ' + payload.rootFolderId);
+    Logger.log('Total Items: ' + payload.items.length);
+    Logger.log('Root Items: ' + payload.rootItems.length);
+    Logger.log('Updated At: ' + payload.updatedAt);
+
+    if (payload.rootItems.length > 0) {
+      Logger.log('First Root Item: ' + payload.rootItems[0].name);
+    }
+  });
 }
