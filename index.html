@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <!--
   Google Drive Crawler interface
-  Version: v2.0.0
+  Version: v2.1.1
 
   Features:
   - Read from Google Sheet Snapshot
+  - Full Snapshot Preload
+  - Frontend Parent Map
+  - Root Items Fix
+  - Folder click without backend loading
   - Manual Refresh Database button
   - Daily Auto Refresh supported by backend trigger
   - Default: English
@@ -162,6 +166,14 @@
         background: #f3f4f6;
         color: #9ca3af;
         cursor: wait;
+      }
+
+      .snapshot-meta {
+        font-size: 11px;
+        color: #6b7280;
+        line-height: 1.4;
+        margin-bottom: 10px;
+        padding: 0 2px;
       }
 
       .search-wrap {
@@ -425,9 +437,9 @@
     <div id="loadingOverlay" class="loading-overlay">
       <div class="loading-box">
         <div class="loading-spinner"></div>
-        <div id="loadingTitle" class="loading-title">Loading folders</div>
+        <div id="loadingTitle" class="loading-title">Loading database</div>
         <div id="loadingText" class="loading-text">
-          Loading database. Please wait.<br>
+          Loading full database. Please wait.<br>
           The window will close automatically when ready.
         </div>
       </div>
@@ -447,6 +459,8 @@
           <button id="refreshBtn" class="refresh-btn" onclick="manualRefreshSnapshot()">
             Refresh Database
           </button>
+
+          <div id="snapshotMeta" class="snapshot-meta"></div>
 
           <div class="search-wrap">
             <input
@@ -511,22 +525,18 @@
           panel1Collapsed: 'Panel 1',
           panel2Collapsed: 'Panel 2',
           loadingTitle: 'Loading database',
-          loadingText: 'Loading database. Please wait.<br>The window will close automatically when ready.',
+          loadingText: 'Loading full database. Please wait.<br>The window will close automatically when ready.',
           refreshingTitle: 'Refreshing database',
           refreshingText: 'Rebuilding the database from Google Drive.<br>This may take 20–30 seconds.',
           refreshBtn: 'Refresh Database',
           refreshSuccess: 'Database refreshed successfully.',
           refreshFailed: 'Refresh failed: ',
+          lastUpdated: 'Last updated',
+          totalItems: 'Total items',
           searchPlaceholder: 'Search all files...',
-          searchIndexPlaceholder: 'Loading search index...',
-          searchIndexPanel: 'Loading search index, please wait...',
-          searchIndexLoading: 'Loading search index...',
-          searchIndexFailed: 'Search index failed: ',
           loadFailed: 'Load failed: ',
-          folderLoadFailed: 'Folder loading failed: ',
           noData: 'No data found. Please click Refresh Database first.',
           folderEmpty: 'This folder is empty',
-          loading: 'Loading...',
           noSearchResult: 'No matching files found',
           panel2Empty: 'Select a folder from Panel 1 first',
           viewerDefaultTitle: 'Select a file',
@@ -548,22 +558,18 @@
           panel1Collapsed: '第一階',
           panel2Collapsed: '第二階',
           loadingTitle: '讀取資料庫中',
-          loadingText: '正在載入資料庫，請稍候。<br>讀取完成後將自動關閉。',
+          loadingText: '正在一次載入完整資料庫，請稍候。<br>讀取完成後將自動關閉。',
           refreshingTitle: '更新資料庫中',
           refreshingText: '正在從 Google Drive 重建資料庫。<br>可能需要 20–30 秒。',
           refreshBtn: 'Refresh Database',
           refreshSuccess: '資料庫更新完成。',
           refreshFailed: '資料庫更新失敗：',
+          lastUpdated: '最後更新',
+          totalItems: '總項目',
           searchPlaceholder: '搜尋所有文件...',
-          searchIndexPlaceholder: '搜尋索引讀取中...',
-          searchIndexPanel: '搜尋索引讀取中，請稍候...',
-          searchIndexLoading: '搜尋索引讀取中...',
-          searchIndexFailed: '搜尋索引讀取失敗：',
           loadFailed: '載入失敗：',
-          folderLoadFailed: '資料夾讀取失敗：',
           noData: '目前沒有資料，請先點擊 Refresh Database。',
           folderEmpty: '此資料夾沒有內容',
-          loading: '讀取中...',
           noSearchResult: '找不到符合的文件',
           panel2Empty: '請先從第一階選擇一個資料夾',
           viewerDefaultTitle: '請選擇文件',
@@ -588,11 +594,14 @@
         return I18N[LANG][key] || I18N.en[key] || key;
       }
 
+      let rootFolderId = '';
       let rootItems = [];
+
+      let allSnapshotItems = [];
+      let parentMap = {};
+
       let searchIndex = [];
       let searchIndexLoaded = false;
-      let searchIndexLoading = false;
-      let pendingSearchKeyword = '';
 
       let childrenCache = {};
       let expandedPanel1 = {};
@@ -607,9 +616,9 @@
         showLoading(t('loadingTitle'), t('loadingText'));
 
         google.script.run
-          .withSuccessHandler(onRootLoaded)
+          .withSuccessHandler(onFullSnapshotLoaded)
           .withFailureHandler(onLoadError)
-          .getRootItems();
+          .getFullSnapshotPayload();
       }
 
       function applyLanguage() {
@@ -628,8 +637,10 @@
         document.getElementById('viewerTitle').textContent = t('viewerDefaultTitle');
         document.getElementById('viewerMeta').textContent = t('viewerDefaultMeta');
         document.getElementById('openOriginalBtn').textContent = t('openDrive');
+
         document.getElementById('viewerCard').innerHTML =
           '<div class="empty-state">' + t('viewerDefaultBody') + '</div>';
+
         resetPanel2();
       }
 
@@ -648,15 +659,76 @@
         if (overlay) overlay.style.display = 'none';
       }
 
-      function onRootLoaded(data) {
-        rootItems = data || [];
-        childrenCache.root = rootItems;
+      function onFullSnapshotLoaded(payload) {
+        payload = payload || {};
+
+        rootFolderId = payload.rootFolderId || '';
+        allSnapshotItems = payload.items || [];
+        parentMap = buildParentMap(allSnapshotItems);
+
+        // v2.1.1 Fix:
+        // 後端直接提供 rootItems，避免 parentId mapping 對不上時 Panel 1 空白
+        rootItems = payload.rootItems || parentMap[rootFolderId] || [];
+
+        childrenCache = parentMap;
+
+        searchIndex = allSnapshotItems.filter(item => item.itemType === 'file');
+        searchIndexLoaded = true;
+
+        updateSnapshotMeta(payload.updatedAt, payload.rowCount || allSnapshotItems.length);
         renderPanel1();
         hideLoading();
       }
 
+      function buildParentMap(items) {
+        const map = {};
+
+        items.forEach(item => {
+          if (item.itemType === 'folder' && !map[item.id]) {
+            map[item.id] = [];
+          }
+        });
+
+        items.forEach(item => {
+          const parentId = item.parentId || '';
+
+          if (!map[parentId]) {
+            map[parentId] = [];
+          }
+
+          map[parentId].push(item);
+        });
+
+        Object.keys(map).forEach(parentId => {
+          map[parentId].sort((a, b) => {
+            if (a.itemType !== b.itemType) {
+              return a.itemType === 'folder' ? -1 : 1;
+            }
+
+            return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant');
+          });
+        });
+
+        return map;
+      }
+
+      function updateSnapshotMeta(updatedAt, totalItems) {
+        const meta = document.getElementById('snapshotMeta');
+        if (!meta) return;
+
+        if (!updatedAt && !totalItems) {
+          meta.textContent = '';
+          return;
+        }
+
+        meta.textContent =
+          t('lastUpdated') + ': ' + (updatedAt || '-') + '｜' +
+          t('totalItems') + ': ' + (totalItems || 0);
+      }
+
       function onLoadError(err) {
         hideLoading();
+
         document.getElementById('panel1Body').innerHTML =
           '<div class="empty-state">' + t('loadFailed') + escapeHtml(err.message || err) + '</div>';
       }
@@ -673,10 +745,10 @@
         google.script.run
           .withSuccessHandler(function () {
             rootItems = [];
+            allSnapshotItems = [];
+            parentMap = {};
             searchIndex = [];
             searchIndexLoaded = false;
-            searchIndexLoading = false;
-            pendingSearchKeyword = '';
 
             childrenCache = {};
             expandedPanel1 = {};
@@ -690,13 +762,14 @@
             resetPanel2();
 
             google.script.run
-              .withSuccessHandler(function (data) {
+              .withSuccessHandler(function (payload) {
                 btn.disabled = false;
                 input.disabled = false;
                 input.value = '';
+
                 document.getElementById('searchClearBtn').classList.remove('show');
 
-                onRootLoaded(data);
+                onFullSnapshotLoaded(payload);
                 alert(t('refreshSuccess'));
               })
               .withFailureHandler(function (err) {
@@ -704,12 +777,13 @@
                 input.disabled = false;
                 onLoadError(err);
               })
-              .getRootItems();
+              .getFullSnapshotPayload();
           })
           .withFailureHandler(function (err) {
             btn.disabled = false;
             input.disabled = false;
             hideLoading();
+
             alert(t('refreshFailed') + (err.message || err));
           })
           .refreshSnapshotManual();
@@ -761,11 +835,7 @@
       }
 
       function renderPanel1SecondLevelList(folderId) {
-        if (!childrenCache[folderId]) {
-          return '<div class="tree-loading">' + t('loading') + '</div>';
-        }
-
-        const children = childrenCache[folderId];
+        const children = childrenCache[folderId] || [];
 
         if (!children.length) {
           return '<div class="tree-empty">' + t('folderEmpty') + '</div>';
@@ -797,18 +867,6 @@
         expandedPanel1[folderId] = !expandedPanel1[folderId];
 
         renderPanel1();
-
-        if (expandedPanel1[folderId] && !childrenCache[folderId]) {
-          const box = document.getElementById('panel1-children-' + folderId);
-          if (box) {
-            box.classList.add('expanded');
-            box.innerHTML = '<div class="tree-loading">' + t('loading') + '</div>';
-          }
-
-          loadFolderChildren(folderId, function () {
-            renderPanel1();
-          });
-        }
       }
 
       function selectSecondLevelFolder(folderId) {
@@ -816,20 +874,12 @@
         activePanel1FolderId = folderId;
 
         const folder = findFolderById(folderId);
+
         document.getElementById('panel2Title').textContent = folder ? folder.name : 'Folder';
         document.getElementById('panel2Subtitle').textContent = t('panel2FolderSubtitle');
-        document.getElementById('panel2Body').innerHTML = '<div class="tree-loading">' + t('loading') + '</div>';
 
         renderPanel1();
-
-        if (!childrenCache[folderId]) {
-          loadFolderChildren(folderId, function () {
-            renderPanel1();
-            renderPanel2(folderId);
-          });
-        } else {
-          renderPanel2(folderId);
-        }
+        renderPanel2(folderId);
       }
 
       function renderPanel2(folderId) {
@@ -883,11 +933,7 @@
       }
 
       function renderPanel2Children(folderId, childLevel) {
-        if (!childrenCache[folderId]) {
-          return '<div class="tree-loading">' + t('loading') + '</div>';
-        }
-
-        const children = childrenCache[folderId];
+        const children = childrenCache[folderId] || [];
 
         if (!children.length) {
           return '<div class="tree-empty">' + t('folderEmpty') + '</div>';
@@ -910,32 +956,7 @@
 
       function togglePanel2Folder(folderId, level) {
         expandedPanel2[folderId] = !expandedPanel2[folderId];
-
         renderPanel2(activePanel2FolderId);
-
-        if (expandedPanel2[folderId] && !childrenCache[folderId]) {
-          const box = document.getElementById('panel2-children-' + folderId);
-          if (box) {
-            box.classList.add('expanded');
-            box.innerHTML = '<div class="tree-loading">' + t('loading') + '</div>';
-          }
-
-          loadFolderChildren(folderId, function () {
-            renderPanel2(activePanel2FolderId);
-          });
-        }
-      }
-
-      function loadFolderChildren(folderId, callback) {
-        google.script.run
-          .withSuccessHandler(function (data) {
-            childrenCache[folderId] = data || [];
-            if (callback) callback();
-          })
-          .withFailureHandler(function (err) {
-            alert(t('folderLoadFailed') + (err.message || err));
-          })
-          .getFolderChildren(folderId);
       }
 
       function resetPanel2() {
@@ -963,67 +984,15 @@
         }
 
         resetPanel2();
-
-        if (!searchIndexLoaded) {
-          pendingSearchKeyword = keyword;
-          loadSearchIndexFirstTime();
-          return;
-        }
-
         renderSearchResults(keyword);
-      }
-
-      function loadSearchIndexFirstTime() {
-        if (searchIndexLoading) {
-          document.getElementById('panel1Body').innerHTML =
-            '<div class="empty-state">' + t('searchIndexLoading') + '</div>';
-          return;
-        }
-
-        searchIndexLoading = true;
-
-        const input = document.getElementById('searchInput');
-        input.disabled = true;
-        input.placeholder = t('searchIndexPlaceholder');
-
-        document.getElementById('panel1Body').innerHTML =
-          '<div class="empty-state">' + t('searchIndexPanel') + '</div>';
-
-        google.script.run
-          .withSuccessHandler(function (data) {
-            searchIndex = data || [];
-            searchIndexLoaded = true;
-            searchIndexLoading = false;
-
-            input.disabled = false;
-            input.placeholder = t('searchPlaceholder');
-            input.focus();
-
-            const latestKeyword = input.value.trim() || pendingSearchKeyword;
-            if (latestKeyword) {
-              renderSearchResults(latestKeyword);
-            } else {
-              renderPanel1();
-            }
-          })
-          .withFailureHandler(function (err) {
-            searchIndexLoading = false;
-            input.disabled = false;
-            input.placeholder = t('searchPlaceholder');
-
-            document.getElementById('panel1Body').innerHTML =
-              '<div class="empty-state">' + t('searchIndexFailed') + escapeHtml(err.message || err) + '</div>';
-          })
-          .getSearchIndex();
       }
 
       function clearSearch() {
         const input = document.getElementById('searchInput');
+
         input.value = '';
         input.placeholder = t('searchPlaceholder');
         input.disabled = false;
-
-        pendingSearchKeyword = '';
 
         document.getElementById('searchClearBtn').classList.remove('show');
 
@@ -1074,6 +1043,7 @@
         activeFileId = fileItem.id;
 
         const keyword = document.getElementById('searchInput').value.trim();
+
         if (keyword && searchIndexLoaded) {
           renderSearchResults(keyword);
         } else {
@@ -1086,8 +1056,10 @@
 
       function openFile(fileItem) {
         document.getElementById('viewerTitle').textContent = fileItem.name;
+
         document.getElementById('viewerMeta').textContent =
-          t('type') + ': ' + (fileItem.fileType || 'file') + (fileItem.path ? '　｜　' + t('path') + ': ' + fileItem.path : '');
+          t('type') + ': ' + (fileItem.fileType || 'file') +
+          (fileItem.path ? '　｜　' + t('path') + ': ' + fileItem.path : '');
 
         const btn = document.getElementById('openOriginalBtn');
         btn.href = fileItem.openLink || fileItem.previewLink || '#';
@@ -1130,6 +1102,7 @@
         btn.style.display = 'inline-block';
 
         const viewer = document.getElementById('viewerCard');
+
         viewer.innerHTML = `
           <div class="unsupported-card">
             <div class="unsupported-box">
@@ -1144,43 +1117,13 @@
       }
 
       function findFileById(fileId) {
-        const searchFile = (searchIndex || []).find(f => f.id === fileId);
-        if (searchFile) return searchFile;
-
-        const rootFound = findItemRecursive(rootItems, fileId, 'file');
-        if (rootFound) return rootFound;
-
-        for (const folderId in childrenCache) {
-          const found = findItemRecursive(childrenCache[folderId], fileId, 'file');
-          if (found) return found;
-        }
-
-        return null;
+        const found = allSnapshotItems.find(item => item.id === fileId && item.itemType === 'file');
+        return found || null;
       }
 
       function findFolderById(folderId) {
-        const rootFound = findItemRecursive(rootItems, folderId, 'folder');
-        if (rootFound) return rootFound;
-
-        for (const id in childrenCache) {
-          const found = findItemRecursive(childrenCache[id], folderId, 'folder');
-          if (found) return found;
-        }
-
-        return null;
-      }
-
-      function findItemRecursive(items, targetId, itemType) {
-        for (const item of items || []) {
-          if (item.id === targetId && item.itemType === itemType) return item;
-
-          if (item.itemType === 'folder' && childrenCache[item.id]) {
-            const found = findItemRecursive(childrenCache[item.id], targetId, itemType);
-            if (found) return found;
-          }
-        }
-
-        return null;
+        const found = allSnapshotItems.find(item => item.id === folderId && item.itemType === 'folder');
+        return found || null;
       }
 
       function getIcon(item) {

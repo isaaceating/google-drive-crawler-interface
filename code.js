@@ -1,13 +1,15 @@
 /**
  * Google Drive Crawler interface
- * Version: v2.0.0
+ * Version: v2.1.1
  *
  * Features:
  * 1. Google Sheet Snapshot：前台瀏覽與搜尋改讀 Snapshot Sheet，不再即時掃 Drive
- * 2. Manual Refresh：前台按 Refresh Database 可手動重建 Snapshot
- * 3. Daily Auto Refresh：可建立每日自動重建 Snapshot trigger
- * 4. Frontend Cache：保留前端 childrenCache，提升同一次使用體驗
- * 5. Language：?lang=en / ?lang=ch，預設英文
+ * 2. Full Snapshot Preload：開頁時一次載入完整 Snapshot，點資料夾不再呼叫後端
+ * 3. Frontend Parent Map：前端建立 parentId map，資料夾切換接近秒開
+ * 4. Root Items Fix：後端直接回傳 rootItems，避免第一層顯示空白
+ * 5. Manual Refresh：前台按 Refresh Database 可手動重建 Snapshot
+ * 6. Daily Auto Refresh：可建立每日自動重建 Snapshot trigger
+ * 7. Language：?lang=en / ?lang=ch，預設英文
  */
 
 const ROOT_FOLDER_ID = '1XtR0qP5DJIQ6jIL6Vh8hhAhJa-wdLVDL';
@@ -39,49 +41,87 @@ function doGet(e) {
 }
 
 /**
- * Frontend API：取得 Root folder 第一層內容
- * v2.0 改為讀 Google Sheet Snapshot
+ * v2.1.1 Frontend API：
+ * 開頁時一次回傳完整 Snapshot payload
+ * 直接包含 rootItems，避免前端第一層 mapping 失敗
  */
-function getRootItems() {
-  return getSnapshotChildren_(ROOT_FOLDER_ID);
-}
-
-/**
- * Frontend API：取得指定 folder 的子項目
- * v2.0 改為讀 Google Sheet Snapshot
- */
-function getFolderChildren(folderId) {
-  return getSnapshotChildren_(folderId);
-}
-
-/**
- * Frontend API：取得搜尋索引
- * v2.0 改為直接讀 Snapshot Sheet，不再使用 CacheService
- */
-function getSearchIndex() {
+function getFullSnapshotPayload() {
   const sheet = getSnapshotSheet_();
   const values = sheet.getDataRange().getValues();
 
-  if (values.length <= 1) return [];
+  if (values.length <= 1) {
+    return {
+      rootFolderId: ROOT_FOLDER_ID,
+      rootItems: [],
+      items: [],
+      updatedAt: '',
+      rowCount: 0
+    };
+  }
 
   const headers = values[0];
   const rows = values.slice(1);
   const idx = buildHeaderIndex_(headers);
 
-  const files = rows
-    .filter(row => row[idx.itemType] === 'file')
+  const items = rows
+    .filter(row => row[idx.id])
     .map(row => ({
-      id: row[idx.id],
-      name: row[idx.name],
-      itemType: row[idx.itemType],
-      fileType: row[idx.fileType],
-      previewLink: row[idx.previewLink],
-      openLink: row[idx.openLink],
-      path: row[idx.path]
+      id: String(row[idx.id] || ''),
+      parentId: String(row[idx.parentId] || ''),
+      name: String(row[idx.name] || ''),
+      itemType: String(row[idx.itemType] || ''),
+      fileType: String(row[idx.fileType] || ''),
+      previewLink: String(row[idx.previewLink] || ''),
+      openLink: String(row[idx.openLink] || ''),
+      path: String(row[idx.path] || ''),
+      level: Number(row[idx.level] || 0),
+      hasChildren: String(row[idx.itemType] || '') === 'folder'
     }));
 
-  files.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
-  return files;
+  items.sort(sortItems_);
+
+  let rootItems = items.filter(item => item.parentId === ROOT_FOLDER_ID);
+
+  // Fallback：如果 parentId 沒對上，就用 level 1 當第一層
+  if (!rootItems.length) {
+    rootItems = items.filter(item => item.level === 1);
+  }
+
+  rootItems.sort(sortItems_);
+
+  const updatedAt = getLatestUpdatedAtString_(rows, idx);
+
+  return {
+    rootFolderId: ROOT_FOLDER_ID,
+    rootItems: rootItems,
+    items: items,
+    updatedAt: updatedAt,
+    rowCount: items.length
+  };
+}
+
+/**
+ * v2.0 相容 API：
+ * 保留給測試或舊版前端使用
+ */
+function getRootItems() {
+  return getSnapshotChildren_(ROOT_FOLDER_ID);
+}
+
+function getFolderChildren(folderId) {
+  return getSnapshotChildren_(folderId);
+}
+
+/**
+ * v2.0 相容 API：
+ * v2.1.1 前端已在開頁時載入 searchIndex，正常不會再呼叫這個 function
+ */
+function getSearchIndex() {
+  const payload = getFullSnapshotPayload();
+
+  return payload.items
+    .filter(item => item.itemType === 'file')
+    .sort(sortItems_);
 }
 
 /**
@@ -129,7 +169,6 @@ function deleteDailySnapshotTrigger() {
 
 /**
  * 核心：重建 Snapshot
- * 會掃描 ROOT_FOLDER_ID 底下所有 folder / file，並寫入 Snapshot Sheet
  */
 function rebuildSnapshot() {
   const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
@@ -149,6 +188,7 @@ function rebuildSnapshot() {
     const pathA = String(a[7] || '');
     const pathB = String(b[7] || '');
     const parentCompare = pathA.localeCompare(pathB, 'zh-Hant');
+
     if (parentCompare !== 0) return parentCompare;
 
     const typeA = a[3];
@@ -181,6 +221,7 @@ function rebuildSnapshot() {
 
 /**
  * 從 Snapshot Sheet 讀取指定 parentId 的子項目
+ * v2.1.1 前端不再主要使用，但保留相容
  */
 function getSnapshotChildren_(parentId) {
   const sheet = getSnapshotSheet_();
@@ -193,25 +234,19 @@ function getSnapshotChildren_(parentId) {
   const idx = buildHeaderIndex_(headers);
 
   const items = rows
-    .filter(row => row[idx.parentId] === parentId)
+    .filter(row => String(row[idx.parentId] || '') === String(parentId || ''))
     .map(row => ({
-      id: row[idx.id],
-      name: row[idx.name],
-      itemType: row[idx.itemType],
-      fileType: row[idx.fileType],
-      previewLink: row[idx.previewLink],
-      openLink: row[idx.openLink],
-      path: row[idx.path],
-      hasChildren: row[idx.itemType] === 'folder'
+      id: String(row[idx.id] || ''),
+      name: String(row[idx.name] || ''),
+      itemType: String(row[idx.itemType] || ''),
+      fileType: String(row[idx.fileType] || ''),
+      previewLink: String(row[idx.previewLink] || ''),
+      openLink: String(row[idx.openLink] || ''),
+      path: String(row[idx.path] || ''),
+      hasChildren: String(row[idx.itemType] || '') === 'folder'
     }));
 
-  items.sort((a, b) => {
-    if (a.itemType !== b.itemType) {
-      return a.itemType === 'folder' ? -1 : 1;
-    }
-    return a.name.localeCompare(b.name, 'zh-Hant');
-  });
-
+  items.sort(sortItems_);
   return items;
 }
 
@@ -290,10 +325,48 @@ function getSnapshotSheet_() {
  */
 function buildHeaderIndex_(headers) {
   const idx = {};
+
   headers.forEach((h, i) => {
     idx[String(h).trim()] = i;
   });
+
   return idx;
+}
+
+/**
+ * 共用排序：folder 在前，file 在後，名稱依 zh-Hant 排序
+ */
+function sortItems_(a, b) {
+  if (a.itemType !== b.itemType) {
+    return a.itemType === 'folder' ? -1 : 1;
+  }
+
+  return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant');
+}
+
+/**
+ * 取得 Snapshot 最新更新時間，回傳字串
+ */
+function getLatestUpdatedAtString_(rows, idx) {
+  if (idx.updatedAt === undefined) return '';
+
+  let latest = null;
+
+  rows.forEach(row => {
+    const value = row[idx.updatedAt];
+
+    if (value instanceof Date) {
+      if (!latest || value > latest) latest = value;
+    }
+  });
+
+  if (!latest) return '';
+
+  return Utilities.formatDate(
+    latest,
+    Session.getScriptTimeZone(),
+    'yyyy-MM-dd HH:mm'
+  );
 }
 
 /**
@@ -340,4 +413,20 @@ function buildPreviewLink_(file, type) {
   if (type === 'video') return `https://drive.google.com/file/d/${id}/preview`;
 
   return file.getUrl();
+}
+
+/**
+ * 測試用：確認 Snapshot payload 是否有資料
+ */
+function testSnapshotPayload() {
+  const payload = getFullSnapshotPayload();
+
+  Logger.log('Root Folder ID: ' + payload.rootFolderId);
+  Logger.log('Total Items: ' + payload.items.length);
+  Logger.log('Root Items: ' + payload.rootItems.length);
+  Logger.log('Updated At: ' + payload.updatedAt);
+
+  if (payload.rootItems.length > 0) {
+    Logger.log('First Root Item: ' + payload.rootItems[0].name);
+  }
 }
