@@ -1,8 +1,12 @@
 <!DOCTYPE html>
 <!--
   Google Drive Crawler interface
-  Version: v1.7.3
-  Language:
+  Version: v2.0.0
+
+  Features:
+  - Read from Google Sheet Snapshot
+  - Manual Refresh Database button
+  - Daily Auto Refresh supported by backend trigger
   - Default: English
   - English: ?lang=en
   - Chinese: ?lang=ch
@@ -135,6 +139,29 @@
       .search-area {
         padding: 12px;
         border-bottom: 1px solid #eef2f7;
+      }
+
+      .refresh-btn {
+        width: 100%;
+        padding: 9px 12px;
+        margin-bottom: 10px;
+        border: 1px solid #bfd2e8;
+        border-radius: 8px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .refresh-btn:hover {
+        background: #dbeafe;
+      }
+
+      .refresh-btn:disabled {
+        background: #f3f4f6;
+        color: #9ca3af;
+        cursor: wait;
       }
 
       .search-wrap {
@@ -400,7 +427,7 @@
         <div class="loading-spinner"></div>
         <div id="loadingTitle" class="loading-title">Loading folders</div>
         <div id="loadingText" class="loading-text">
-          Loading folder data. This may take 20–30 seconds.<br>
+          Loading database. Please wait.<br>
           The window will close automatically when ready.
         </div>
       </div>
@@ -417,6 +444,10 @@
         </div>
 
         <div class="search-area">
+          <button id="refreshBtn" class="refresh-btn" onclick="manualRefreshSnapshot()">
+            Refresh Database
+          </button>
+
           <div class="search-wrap">
             <input
               id="searchInput"
@@ -479,16 +510,21 @@
           panel2FolderSubtitle: 'Showing level 3 folders and files in this folder',
           panel1Collapsed: 'Panel 1',
           panel2Collapsed: 'Panel 2',
-          loadingTitle: 'Loading folders',
-          loadingText: 'Loading folder data. This may take 20–30 seconds.<br>The window will close automatically when ready.',
+          loadingTitle: 'Loading database',
+          loadingText: 'Loading database. Please wait.<br>The window will close automatically when ready.',
+          refreshingTitle: 'Refreshing database',
+          refreshingText: 'Rebuilding the database from Google Drive.<br>This may take 20–30 seconds.',
+          refreshBtn: 'Refresh Database',
+          refreshSuccess: 'Database refreshed successfully.',
+          refreshFailed: 'Refresh failed: ',
           searchPlaceholder: 'Search all files...',
-          searchIndexPlaceholder: 'Building search index...',
-          searchIndexPanel: 'Building search index, please wait...',
-          searchIndexLoading: 'Building search index...',
+          searchIndexPlaceholder: 'Loading search index...',
+          searchIndexPanel: 'Loading search index, please wait...',
+          searchIndexLoading: 'Loading search index...',
           searchIndexFailed: 'Search index failed: ',
           loadFailed: 'Load failed: ',
           folderLoadFailed: 'Folder loading failed: ',
-          noData: 'No data found',
+          noData: 'No data found. Please click Refresh Database first.',
           folderEmpty: 'This folder is empty',
           loading: 'Loading...',
           noSearchResult: 'No matching files found',
@@ -511,16 +547,21 @@
           panel2FolderSubtitle: '顯示此資料夾內的第三層資料夾與文件',
           panel1Collapsed: '第一階',
           panel2Collapsed: '第二階',
-          loadingTitle: '讀取文件資料夾中',
-          loadingText: '正在載入資料，可能需要 20–30 秒。<br>讀取完成後將自動關閉。',
+          loadingTitle: '讀取資料庫中',
+          loadingText: '正在載入資料庫，請稍候。<br>讀取完成後將自動關閉。',
+          refreshingTitle: '更新資料庫中',
+          refreshingText: '正在從 Google Drive 重建資料庫。<br>可能需要 20–30 秒。',
+          refreshBtn: 'Refresh Database',
+          refreshSuccess: '資料庫更新完成。',
+          refreshFailed: '資料庫更新失敗：',
           searchPlaceholder: '搜尋所有文件...',
-          searchIndexPlaceholder: '搜尋索引建立中...',
-          searchIndexPanel: '搜尋索引建立中，請稍候...',
-          searchIndexLoading: '搜尋索引建立中...',
-          searchIndexFailed: '搜尋索引建立失敗：',
+          searchIndexPlaceholder: '搜尋索引讀取中...',
+          searchIndexPanel: '搜尋索引讀取中，請稍候...',
+          searchIndexLoading: '搜尋索引讀取中...',
+          searchIndexFailed: '搜尋索引讀取失敗：',
           loadFailed: '載入失敗：',
           folderLoadFailed: '資料夾讀取失敗：',
-          noData: '目前沒有資料',
+          noData: '目前沒有資料，請先點擊 Refresh Database。',
           folderEmpty: '此資料夾沒有內容',
           loading: '讀取中...',
           noSearchResult: '找不到符合的文件',
@@ -563,7 +604,7 @@
 
       function init() {
         applyLanguage();
-        showLoading();
+        showLoading(t('loadingTitle'), t('loadingText'));
 
         google.script.run
           .withSuccessHandler(onRootLoaded)
@@ -580,6 +621,7 @@
         document.getElementById('panel2Subtitle').textContent = t('panel2DefaultSubtitle');
         document.getElementById('panel1Collapsed').textContent = t('panel1Collapsed');
         document.getElementById('panel2Collapsed').textContent = t('panel2Collapsed');
+        document.getElementById('refreshBtn').textContent = t('refreshBtn');
         document.getElementById('loadingTitle').textContent = t('loadingTitle');
         document.getElementById('loadingText').innerHTML = t('loadingText');
         document.getElementById('searchInput').placeholder = t('searchPlaceholder');
@@ -591,8 +633,13 @@
         resetPanel2();
       }
 
-      function showLoading() {
+      function showLoading(title, text) {
         const overlay = document.getElementById('loadingOverlay');
+        const loadingTitle = document.getElementById('loadingTitle');
+        const loadingText = document.getElementById('loadingText');
+
+        if (loadingTitle) loadingTitle.textContent = title || t('loadingTitle');
+        if (loadingText) loadingText.innerHTML = text || t('loadingText');
         if (overlay) overlay.style.display = 'flex';
       }
 
@@ -612,6 +659,60 @@
         hideLoading();
         document.getElementById('panel1Body').innerHTML =
           '<div class="empty-state">' + t('loadFailed') + escapeHtml(err.message || err) + '</div>';
+      }
+
+      function manualRefreshSnapshot() {
+        const btn = document.getElementById('refreshBtn');
+        const input = document.getElementById('searchInput');
+
+        btn.disabled = true;
+        input.disabled = true;
+
+        showLoading(t('refreshingTitle'), t('refreshingText'));
+
+        google.script.run
+          .withSuccessHandler(function () {
+            rootItems = [];
+            searchIndex = [];
+            searchIndexLoaded = false;
+            searchIndexLoading = false;
+            pendingSearchKeyword = '';
+
+            childrenCache = {};
+            expandedPanel1 = {};
+            expandedPanel2 = {};
+
+            activeFileId = null;
+            activePanel1FolderId = null;
+            activePanel2FolderId = null;
+
+            clearViewer();
+            resetPanel2();
+
+            google.script.run
+              .withSuccessHandler(function (data) {
+                btn.disabled = false;
+                input.disabled = false;
+                input.value = '';
+                document.getElementById('searchClearBtn').classList.remove('show');
+
+                onRootLoaded(data);
+                alert(t('refreshSuccess'));
+              })
+              .withFailureHandler(function (err) {
+                btn.disabled = false;
+                input.disabled = false;
+                onLoadError(err);
+              })
+              .getRootItems();
+          })
+          .withFailureHandler(function (err) {
+            btn.disabled = false;
+            input.disabled = false;
+            hideLoading();
+            alert(t('refreshFailed') + (err.message || err));
+          })
+          .refreshSnapshotManual();
       }
 
       function togglePanel(panelId, btn) {
@@ -1005,6 +1106,18 @@
         viewer.innerHTML = `
           <iframe class="viewer-frame" src="${escapeAttr(fileItem.previewLink)}" allowfullscreen></iframe>
         `;
+      }
+
+      function clearViewer() {
+        document.getElementById('viewerTitle').textContent = t('viewerDefaultTitle');
+        document.getElementById('viewerMeta').textContent = t('viewerDefaultMeta');
+
+        const btn = document.getElementById('openOriginalBtn');
+        btn.href = '#';
+        btn.style.display = 'none';
+
+        document.getElementById('viewerCard').innerHTML =
+          '<div class="empty-state">' + t('viewerDefaultBody') + '</div>';
       }
 
       function openFolderUnsupported(folderId, folderName, folderLink) {
